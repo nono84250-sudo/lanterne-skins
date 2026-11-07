@@ -90,3 +90,66 @@ test('setSkin : objet Skin fabriqué avec une image géante refusé avant envoi'
   await assert.rejects(account.setSkin('jeton-de-test-123456', s, { fetch }), code('SKIN_INVALID_SIZE'));
   assert.equal(sent, false);
 });
+
+test('garde-robe : une entrée au nom bizarre ne cache pas les autres', async () => {
+  const dir = await tmpDir();
+  const w = createWardrobe(dir);
+  const a = await w.add(testSkin(), { name: 'a' });
+  await fs.writeFile(path.join(dir, 'index.json'), JSON.stringify([{ id: a.id, name: null, model: 'classic' }, { id: '0123456789abcdef', name: 7, model: 'slim' }]));
+  assert.deepEqual((await w.list()).map((e) => e.name), ['Skin', 'Skin']);
+  assert.equal((await fs.readdir(dir)).some((f) => f.includes('abime')), false);
+});
+
+test('nettoyage du cache : ne supprime pas un fichier en cours d’écriture', async () => {
+  const dir = await tmpDir();
+  const c = createFileCache(dir);
+  await c.set('profile:a', 1, 60_000);
+  const part = path.join(dir, 'data', `${'0'.repeat(64)}.json.1.abcd.part`);
+  await fs.writeFile(part, 'en cours');
+  await c.prune();
+  assert.ok((await fs.readdir(path.join(dir, 'data'))).some((f) => f.endsWith('.part')));
+  const old = new Date(Date.now() - 3600_000);
+  await fs.utimes(part, old, old);
+  await c.prune();
+  assert.equal((await fs.readdir(path.join(dir, 'data'))).some((f) => f.endsWith('.part')), false);
+});
+
+test('limite de requêtes : annulation prise en compte même en file d’attente', async () => {
+  const { createRateLimiter } = await import('../../src/mojang/net.js');
+  const take = createRateLimiter(1, 1000);
+  await take();
+  const waiting = take();
+  const ac = new AbortController();
+  const queued = take(ac.signal);
+  const t = Date.now();
+  setTimeout(() => ac.abort(), 10);
+  await assert.rejects(queued, code('CANCELLED'));
+  assert.ok(Date.now() - t < 500);
+  await waiting;
+});
+
+test('changer de skin vide aussi le cache du client partagé', async () => {
+  const { defaultClient, resetSkin } = await import('../../src/index.js');
+  const c = defaultClient();
+  const ID = '069a79f444e94726a5befca90e38aaf5';
+  c.cache.set(`profile:${ID}`, { x: 1 }, 60_000);
+  const fetch = async () => new Response(JSON.stringify({ id: ID, name: 'Notch', skins: [], capes: [] }), { status: 200 });
+  await resetSkin('jeton-de-test-123456', { fetch });
+  assert.equal(c.cache.get(`profile:${ID}`), undefined);
+});
+
+test('rendu : skin modifié sur place jamais confondu avec l’original', async () => {
+  const { trustHash } = await import('../../src/core/skin.js');
+  const a = trustHash(await loadSkin(testSkin()), H);
+  const b = trustHash(await loadSkin(testSkin()), H);
+  renderHead(a, { size: 8 });
+  b.data.fill(0, (8 * 64 + 8) * 4, (8 * 64 + 48) * 4); // visage et chapeau
+  assert.notDeepEqual([...renderHead(a, { size: 8 }).data], [...renderHead(b, { size: 8 }).data]);
+});
+
+test('cape abîmée : code d’erreur de cape', async () => {
+  const srv = await startServer({ [`/textures.minecraft.net/texture/${H}`]: bytes(Buffer.from('pas une image')) });
+  try {
+    await assert.rejects(createClient().getCape({ skin: { hash: H, model: 'classic' }, cape: { hash: H } }), code('CAPE_INVALID_FORMAT'));
+  } finally { await srv.close(); }
+});

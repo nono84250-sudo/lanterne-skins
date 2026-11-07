@@ -14,6 +14,7 @@ import { request, commonStatusError, parseJson } from './net.js';
 import { textureFromUrl, dashUuid } from './client.js';
 import { loadSkin, checkModel, Skin } from '../core/skin.js';
 import { encodePng } from '../png/png.js';
+import { existingSharedClient } from './shared.js';
 
 const API = 'https://api.minecraftservices.com/minecraft/profile';
 const CAPE_ID_RE = /^[0-9a-fA-F-]{8,64}$/;
@@ -76,7 +77,10 @@ async function errorFromAccount(r, kind) {
 
 async function afterChange(opts, profile) {
   // Le skin a changé : on oublie le profil public gardé en cache (attendu, et sans jamais faire échouer).
-  try { await opts.client?.cache?.delete?.(`profile:${profile.id}`); } catch { /* rien */ }
+  const clients = new Set([opts.client, existingSharedClient()].filter(Boolean));
+  for (const c of clients) {
+    try { await c.cache?.delete?.(`profile:${profile.id}`); } catch { /* rien */ }
+  }
   return profile;
 }
 

@@ -258,7 +258,14 @@ export function createClient(opts = {}) {
   async function getCape(playerOrQuery, { signal } = {}) {
     const p = await resolve(playerOrQuery, signal);
     if (!p.cape) return null;
-    const bytes = await getTexture(p.cape.hash, { signal });
+    let bytes;
+    try {
+      bytes = await getTexture(p.cape.hash, { signal });
+    } catch (err) {
+      if (err.code === 'SKIN_INVALID_FORMAT') throw new SkinError('CAPE_INVALID_FORMAT', err.detail);
+      if (err.code === 'SKIN_INVALID_SIZE') throw new SkinError('CAPE_INVALID_SIZE', err.detail);
+      throw err;
+    }
     return trustHash(await loadCape(bytes, { hash: p.cape.hash }), p.cape.hash);
   }
 

@@ -133,6 +133,10 @@ export function createFileCache(dir) {
       let n = 0;
       for (const f of names) {
         const full = path.join(dir, f);
+        if (f.endsWith('.part')) {
+          // Fichier en cours d'écriture : on ne touche qu'aux restes vieux de plus de 10 minutes.
+          try { const st = await fs.lstat(full); if (Date.now() - st.mtimeMs < PRUNE_EVERY) continue; } catch { continue; }
+        }
         let drop = !/^[0-9a-f]{64}\.json$/.test(f);
         if (!drop) {
           const b = await readSmall(full);
@@ -176,13 +180,14 @@ export function createWardrobe(dir) {
   const root = checkDir(dir);
   const indexFile = path.join(root, 'index.json');
   const pngFile = (id) => path.join(root, `${id}.png`);
+  const qkey = process.platform === 'win32' || process.platform === 'darwin' ? root.toLowerCase() : root;
   // Une seule file d'attente par dossier, même avec plusieurs createWardrobe() sur le même dossier.
   const serial = (fn) => {
-    const prev = queues.get(root) || Promise.resolve();
+    const prev = queues.get(qkey) || Promise.resolve();
     const p = prev.then(fn);
     const tail = p.catch(() => {});
-    queues.set(root, tail);
-    tail.then(() => { if (queues.get(root) === tail) queues.delete(root); });
+    queues.set(qkey, tail);
+    tail.then(() => { if (queues.get(qkey) === tail) queues.delete(qkey); });
     return p.catch((err) => { throw toSkinError(err); });
   };
 
@@ -190,15 +195,19 @@ export function createWardrobe(dir) {
     // Un fichier verrouillé un instant (antivirus…) ne doit jamais être pris pour une garde-robe vide.
     const b = await readSmall(indexFile, { strict: true });
     if (!b) return [];
+    let j;
     try {
-      const j = JSON.parse(b.toString('utf8'));
-      return Array.isArray(j) ? j.filter((e) => e && ID_RE.test(e.id) && (e.model === 'classic' || e.model === 'slim')).map((e) => ({
-        id: e.id, name: cleanName(e.name), model: e.model, addedAt: typeof e.addedAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(e.addedAt) ? e.addedAt : '',
-      })) : [];
+      j = JSON.parse(b.toString('utf8'));
     } catch {
       // Index illisible : on le met de côté au lieu de l'écraser.
       await fs.rename(indexFile, `${indexFile}.abime-${Date.now()}`).catch(() => {});
       return [];
+    }
+    {
+      // Une entrée bizarre est ignorée ou réparée, jamais toute la garde-robe.
+      return Array.isArray(j) ? j.filter((e) => e && typeof e.id === 'string' && ID_RE.test(e.id) && (e.model === 'classic' || e.model === 'slim')).map((e) => ({
+        id: e.id, name: typeof e.name === 'string' ? cleanName(e.name) : 'Skin', model: e.model, addedAt: typeof e.addedAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(e.addedAt) ? e.addedAt : '',
+      })) : [];
     }
   }
   // Le dossier de la garde-robe est choisi par l'application (il peut être un lien voulu).

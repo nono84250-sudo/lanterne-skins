@@ -7,6 +7,7 @@
 import { SkinError } from '../errors.js';
 import { RgbaImage, blit } from './image.js';
 import { Skin, Cape, trustedHash } from './skin.js';
+import { crc32 } from '../png/crc32.js';
 
 const MAX_OUT = 2048;
 // Rendus gardés en mémoire, avec un budget total (un serveur peut recevoir des tailles variées).
@@ -21,7 +22,8 @@ const byObject = new WeakMap();
 function cached(src, key, make) {
   const hash = trustedHash(src);
   if (hash) {
-    const k = `${hash}:${src.model || ''}:${key}`;
+    // L'empreinte des pixels est ajoutée : un skin modifié sur place n'est jamais confondu.
+    const k = `${hash}:${crc32(src.data)}:${src.model || ''}:${key}`;
     const hit = byHash.get(k);
     if (hit) { byHash.delete(k); byHash.set(k, hit); return hit; }
     const v = make();
