@@ -27,7 +27,7 @@ function checkToken(token) {
 }
 
 function authHeaders(token, extra) {
-  return { authorization: `Bearer ${checkToken(token)}`, accept: 'application/json', ...(extra || {}) };
+  return { accept: 'application/json', ...(extra || {}), authorization: `Bearer ${checkToken(token)}` };
 }
 
 /** Met en forme le profil renvoyé par Mojang. */
@@ -70,7 +70,7 @@ async function errorFromAccount(r, kind) {
   if (r.status === 403) return new SkinError('AUTH_REQUIRED', 'jeton refusé', { status: 403 });
   if (r.status === 404 && kind === 'profile') return new SkinError('NO_MINECRAFT', undefined, { status: 404 });
   if ((r.status === 400 || r.status === 404) && kind === 'cape') return new SkinError('CAPE_NOT_OWNED', undefined, { status: r.status });
-  if (r.status === 404 && kind === 'hide') return new SkinError('NO_MINECRAFT', undefined, { status: 404 });
+  if (r.status === 404 && (kind === 'hide' || kind === 'reset')) return new SkinError('NO_MINECRAFT', undefined, { status: 404 });
   if (r.status === 400 && kind === 'skin') return new SkinError('SKIN_INVALID_FORMAT', 'refusé par Mojang', { status: 400 });
   return new SkinError('MOJANG_REJECTED', String(r.status), { status: r.status });
 }
@@ -79,7 +79,10 @@ async function afterChange(opts, profile) {
   // Le skin a changé : on oublie le profil public gardé en cache (attendu, et sans jamais faire échouer).
   const clients = new Set([opts.client, existingSharedClient()].filter(Boolean));
   for (const c of clients) {
-    try { await c.cache?.delete?.(`profile:${profile.id}`); } catch { /* rien */ }
+    try {
+      if (typeof c.invalidate === 'function') await c.invalidate(profile.id, profile);
+      else await c.cache?.delete?.(`profile:${profile.id}`);
+    } catch { /* rien */ }
   }
   return profile;
 }

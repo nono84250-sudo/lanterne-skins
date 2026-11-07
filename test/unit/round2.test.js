@@ -135,7 +135,8 @@ test('changer de skin vide aussi le cache du client partagé', async () => {
   c.cache.set(`profile:${ID}`, { x: 1 }, 60_000);
   const fetch = async () => new Response(JSON.stringify({ id: ID, name: 'Notch', skins: [], capes: [] }), { status: 200 });
   await resetSkin('jeton-de-test-123456', { fetch });
-  assert.equal(c.cache.get(`profile:${ID}`), undefined);
+  const now = c.cache.get(`profile:${ID}`);
+  assert.equal(now.isDefaultSkin, true); // l'ancien { x: 1 } a été remplacé par le profil à jour
 });
 
 test('rendu : skin modifié sur place jamais confondu avec l’original', async () => {
@@ -203,4 +204,36 @@ test('tour 3 : empreinte en majuscules acceptée ; close() arrête le nettoyage'
   assert.equal(textureUrl('AB'.repeat(32)).hash, 'ab'.repeat(32));
   const c = createFileCache(await tmpDir());
   c.close();
+});
+
+test('tour 4 : après setSkin, une ancienne réponse en route ne remet pas l’ancien skin', async () => {
+  const ID = '069a79f444e94726a5befca90e38aaf5';
+  const OLD = 'aa'.repeat(32), NEW = 'bb'.repeat(32);
+  const { texturesValue } = await import('../helpers.js');
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const fetch = async (u, init) => {
+    const s = String(u);
+    if (s.includes('sessionserver')) {
+      await gate;
+      return new Response(JSON.stringify({ id: ID, name: 'Notch', properties: [{ name: 'textures', value: texturesValue({ SKIN: { url: `http://textures.minecraft.net/texture/${OLD}` } }) }] }));
+    }
+    return new Response(JSON.stringify({ id: ID, name: 'Notch', skins: [{ id: 's', state: 'ACTIVE', url: `http://textures.minecraft.net/texture/${NEW}`, variant: 'SLIM' }], capes: [] }));
+  };
+  const client = createClient({ fetch });
+  const pending = client.getPlayer(ID);
+  await new Promise((r) => setTimeout(r, 20));
+  await account.resetSkin('jeton-de-test-123456', { client, fetch });
+  release();
+  await pending;
+  const after = await client.getPlayer(ID);
+  assert.equal(after.skin.hash, NEW);
+  assert.equal(after.skin.model, 'slim');
+});
+
+test('tour 4 : skin quelconque modifié sur place → redessiné', async () => {
+  const s = await loadSkin(testSkin());
+  const a = renderHead(s, { size: 8 });
+  s.data.fill(0, (8 * 64 + 8) * 4, (8 * 64 + 48) * 4);
+  assert.notDeepEqual([...a.data], [...renderHead(s, { size: 8 }).data]);
 });

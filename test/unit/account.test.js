@@ -150,7 +150,9 @@ test('après un changement, le profil public gardé en cache est oublié', async
     const client = createClient();
     await client.getPlayer(ID);
     await account.resetSkin(TOKEN, { client });
-    await client.getPlayer(ID);
-    assert.equal(srv.ctx.hits[`/sessionserver.mojang.com/session/minecraft/profile/${ID}`], 2);
+    const p = await client.getPlayer(ID);
+    // Le profil du compte (déjà à jour) remplace l'ancien tout de suite, sans redemander à Mojang.
+    assert.equal(p.skin.hash, H1);
+    assert.equal(srv.ctx.hits[`/sessionserver.mojang.com/session/minecraft/profile/${ID}`], 1);
   } finally { await srv.close(); }
 });

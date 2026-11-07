@@ -72,6 +72,9 @@ async function readSmall(file, { strict = false } = {}) {
 const MAX_DATA_TTL = 30 * 24 * 3600 * 1000;
 // « Joueur introuvable » n'est gardé qu'une minute ; on refuse une entrée plantée qui durerait plus.
 const MAX_NULL_TTL = 61 * 1000;
+// Profils et pseudos des joueurs : jamais plus d'une heure, même si un fichier planté dit le contraire.
+const MAX_PLAYER_TTL = 60 * 60 * 1000;
+const maxTtlFor = (key, v) => (isShort(v) ? MAX_NULL_TTL : /^(name|profile):/.test(key) ? MAX_PLAYER_TTL : MAX_DATA_TTL);
 const isShort = (v) => v === null || (!!v && typeof v === 'object' && v.notFound === true);
 const PRUNE_EVERY = 10 * 60 * 1000;
 
@@ -109,7 +112,7 @@ export function createFileCache(dir) {
       if (!b) return undefined;
       try {
         const e = JSON.parse(b.toString('utf8'));
-        if (!e || e.key !== key || typeof e.exp !== 'number' || e.exp > Date.now() + (isShort(e.value) ? MAX_NULL_TTL : MAX_DATA_TTL)) return undefined;
+        if (!e || e.key !== key || typeof e.exp !== 'number' || e.exp > Date.now() + maxTtlFor(key, e.value)) return undefined;
         if (e.exp <= Date.now()) {
           await fs.rm(dataFile(key), { force: true }).catch(() => {}); // périmé : effacé (aucun historique gardé)
           return undefined;
@@ -125,7 +128,7 @@ export function createFileCache(dir) {
         if (!(value instanceof Uint8Array) || !isPng(value)) return;
         return atomicWrite(texFile(h), value);
       }
-      const exp = Date.now() + Math.min(ttlMs, isShort(value) ? MAX_NULL_TTL : MAX_DATA_TTL);
+      const exp = Date.now() + Math.min(ttlMs, maxTtlFor(key, value));
       return atomicWrite(dataFile(key), JSON.stringify({ key, exp, value }));
     },
     async delete(key) {
