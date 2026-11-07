@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { __setTestMirror } from '../src/mojang/net.js';
 
 export const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -66,6 +65,20 @@ export function testSkin({ w = 64, h = 64, alphaFn = () => 255, extra = [] } = {
   return rawPng({ w, h, pixel: (x, y) => [x * 4, y * 4, (x + y) & 255, alphaFn(x, y)], extra });
 }
 
+/**
+ * Pendant les tests, fetch est remplacé par un relais qui envoie chaque adresse officielle
+ * (déjà vérifiée par la bibliothèque) vers le faux serveur local https://localhost:port/<site>/<chemin>.
+ * La bibliothèque elle-même ne contient aucun crochet de test.
+ */
+const realFetch = globalThis.fetch;
+export function mirrorTo(port) {
+  globalThis.fetch = (url, init) => {
+    const u = new URL(String(url));
+    return realFetch(`https://localhost:${port}/${u.host}${u.pathname}${u.search}`, init);
+  };
+  return () => { globalThis.fetch = realFetch; };
+}
+
 /** Faux serveur HTTPS local. Les adresses officielles y sont redirigées : /<site>/<chemin>. */
 export async function startServer(routes) {
   const ctx = { hits: {}, requests: [] };
@@ -87,11 +100,11 @@ export async function startServer(routes) {
   server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
-  __setTestMirror(`https://localhost:${port}/`);
+  const restore = mirrorTo(port);
   return {
     port,
     ctx,
-    close: () => new Promise((r) => { __setTestMirror(null); for (const s of sockets) s.destroy(); server.close(() => r()); }),
+    close: () => new Promise((r) => { restore(); for (const s of sockets) s.destroy(); server.close(() => r()); }),
   };
 }
 

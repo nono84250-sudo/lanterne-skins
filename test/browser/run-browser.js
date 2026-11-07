@@ -74,7 +74,10 @@ const disposed = await page.evaluate(async () => {
   const skin = await L.loadSkin(await (await fetch('/test/fixtures/pil/rgba.png')).arrayBuffer());
   const v2 = await V.createViewer(el, { skin, animation: 'none' });
   v2.dispose();
-  return el.children.length === n;
+  let bad = null;
+  try { await V.createViewer(el, { skin, animation: 'danse' }); } catch (e) { bad = e.code; }
+  try { await V.createViewer(el, { skin, zoom: -1 }); } catch (e) { bad = bad + '/' + e.code; }
+  return el.children.length === n && bad === 'INVALID_OPTION/INVALID_OPTION';
 });
 await browser.close();
 server.close();
@@ -84,7 +87,7 @@ const checks = {
   '3D chargée seulement à la demande': res.lazy === true,
   'adresse refusée par le visualiseur': res.viewerUrlRefused === 'INVALID_OPTION',
   'visualiseur dessiné (pixels non vides)': res.painted > 2000,
-  'visualiseur libéré proprement': disposed,
+  'visualiseur libéré proprement (et rien laissé si option invalide)': disposed,
   'aucune requête vers Internet': outside.length === 0,
   'aucune erreur dans la page': errors.length === 0,
 };

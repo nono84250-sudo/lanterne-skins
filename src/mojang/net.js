@@ -17,10 +17,6 @@ export const ALLOWED_HOSTS = Object.freeze([
 export const USER_AGENT = 'lanterne-skins/0.1';
 const MAX_REDIRECTS = 3;
 
-// Tests automatiques uniquement (pas exporté par le paquet) : toutes les adresses
-// partent vers un faux serveur local https://localhost:port/<site>/<chemin>.
-let testMirror = null;
-export function __setTestMirror(base) { testMirror = base ? String(base).replace(/\/?$/, '/') : null; }
 
 /** Vérifie qu'une adresse est https et officielle. @returns {URL} */
 export function checkUrl(raw) {
@@ -33,14 +29,11 @@ export function checkUrl(raw) {
   return url;
 }
 
-function mirrored(url) {
-  if (!testMirror) return url;
-  return new URL(`${testMirror}${url.host}${url.pathname}${url.search}`);
-}
 
 /** Petit limiteur : au plus `max` requêtes par fenêtre de `windowMs`. */
 export function createRateLimiter(max = 300, windowMs = 10_000) {
-  if (!Number.isInteger(max) || max < 1) throw new SkinError('INVALID_OPTION', 'rateLimit');
+  if (!Number.isInteger(max) || max < 1) throw new SkinError('INVALID_OPTION', 'rateLimit.max');
+  if (!Number.isFinite(windowMs) || windowMs <= 0) throw new SkinError('INVALID_OPTION', 'rateLimit.windowMs');
   const stamps = [];
   let chain = Promise.resolve();
   return function take(signal) {
@@ -50,7 +43,11 @@ export function createRateLimiter(max = 300, windowMs = 10_000) {
         const now = Date.now();
         while (stamps.length && now - stamps[0] >= windowMs) stamps.shift();
         if (stamps.length < max) { stamps.push(now); return; }
-        await new Promise((r) => setTimeout(r, windowMs - (now - stamps[0]) + 1));
+        await new Promise((resolve, reject) => {
+          const onAbort = () => { clearTimeout(t); reject(new SkinError('CANCELLED')); };
+          const t = setTimeout(() => { if (signal) signal.removeEventListener('abort', onAbort); resolve(); }, windowMs - (now - stamps[0]) + 1);
+          if (signal) signal.addEventListener('abort', onAbort, { once: true });
+        });
       }
     });
     chain = p.catch(() => {});
@@ -88,7 +85,7 @@ export async function request(rawUrl, opts = {}) {
     try {
       let res;
       try {
-        res = await doFetch(mirrored(url), { method, headers, body, redirect: 'manual', signal: ctrl.signal });
+        res = await doFetch(url, { method, headers, body, redirect: 'manual', signal: ctrl.signal });
       } catch (err) {
         throw netError(err, timedOut, userSignal, url);
       }

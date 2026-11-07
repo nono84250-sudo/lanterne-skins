@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createClient, SkinError, Skin, Cape, createMemoryCache, parsePlayerQuery, defaultSkinFor, DEFAULT_SKINS, cacheHeaders } from '../../src/index.js';
 import { checkUrl, createRateLimiter, request } from '../../src/mojang/net.js';
 import { javaUuidHash } from '../../src/mojang/defaults.js';
-import { startServer, json, bytes, status, texturesValue, testSkin, rawPng } from '../helpers.js';
+import { startServer, json, bytes, status, texturesValue, testSkin, rawPng, mirrorTo } from '../helpers.js';
 
 const code = (c) => (e) => e instanceof SkinError && e.code === c;
 const ID = '069a79f444e94726a5befca90e38aaf5';
@@ -104,11 +104,10 @@ test('trop de demandes (429) → RATE_LIMITED avec délai ; panne (500/503) → 
 test('réseau coupé → MOJANG_UNAVAILABLE', async () => {
   const srv = await startServer({});
   await srv.close();
-  const { __setTestMirror } = await import('../../src/mojang/net.js');
-  __setTestMirror(`https://localhost:${srv.port}/`); // plus personne n'écoute
+  const restore = mirrorTo(srv.port); // plus personne n'écoute
   try {
     await assert.rejects(createClient().getPlayer('Notch'), code('MOJANG_UNAVAILABLE'));
-  } finally { __setTestMirror(null); }
+  } finally { restore(); }
 });
 
 test('serveur muet → délai dépassé → MOJANG_UNAVAILABLE ; annulation → CANCELLED', async () => {

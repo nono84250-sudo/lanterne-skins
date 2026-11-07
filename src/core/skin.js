@@ -91,8 +91,10 @@ export function detectModel(img64) {
  */
 export function normalizeForGame(img64, legacy) {
   const out = img64.clone();
-  if (legacy && areaAll(out, 32, 0, 64, 16, (a) => a >= 128)) setAlpha(out, 32, 0, 64, 16, 0);
+  // Même ordre que le jeu : tête opaque, puis (vieux skins) zone x32-64 y0-32 vidée si
+  // elle n'a aucun pixel transparent, puis corps/bras/jambes opaques.
   setAlpha(out, 0, 0, 32, 16, 255);
+  if (legacy && areaAll(out, 32, 0, 64, 32, (a) => a >= 128)) setAlpha(out, 32, 0, 64, 32, 0);
   setAlpha(out, 0, 16, 64, 32, 255);
   setAlpha(out, 16, 48, 48, 64, 255);
   return out;

@@ -71,7 +71,8 @@ export class SkinError extends Error {
   constructor(code, detail, extra = {}) {
     const base = MESSAGES.en[code] ? code : 'INTERNAL';
     const msg = MESSAGES.en[base];
-    super(detail ? `${msg} (${detail})` : msg, extra.cause ? { cause: extra.cause } : undefined);
+    // Le message reste exactement le texte anglais du code ; la précision technique va dans `detail`.
+    super(msg, extra.cause ? { cause: extra.cause } : undefined);
     this.name = 'SkinError';
     this.code = base;
     this.detail = detail ? String(detail).slice(0, 300) : '';
