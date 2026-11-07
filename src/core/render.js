@@ -9,15 +9,39 @@ import { RgbaImage, blit } from './image.js';
 import { Skin, Cape } from './skin.js';
 
 const MAX_OUT = 2048;
-const memo = new WeakMap();
+// Rendus gardés en mémoire, avec un budget total (un serveur peut recevoir des tailles variées).
+// Clé : l'empreinte Mojang de l'image quand on l'a (le même joueur ne sera pas redessiné même
+// si son skin est rechargé), sinon l'objet lui-même.
+const MEMO_BUDGET = 32 * 1024 * 1024;
+const MEMO_ITEM_MAX = 1024 * 1024;
+const byHash = new Map();
+let byHashBytes = 0;
+const byObject = new WeakMap();
 
 function cached(src, key, make) {
-  let m = memo.get(src);
-  if (!m) { m = new Map(); memo.set(src, m); }
+  if (typeof src.hash === 'string') {
+    const k = `${src.hash}:${src.model || ''}:${key}`;
+    const hit = byHash.get(k);
+    if (hit) { byHash.delete(k); byHash.set(k, hit); return hit; }
+    const v = make();
+    if (v.data.length <= MEMO_ITEM_MAX) {
+      byHash.set(k, v);
+      byHashBytes += v.data.length;
+      while (byHashBytes > MEMO_BUDGET) {
+        const [oldK, old] = byHash.entries().next().value;
+        byHash.delete(oldK);
+        byHashBytes -= old.data.length;
+      }
+    }
+    return v;
+  }
+  let m = byObject.get(src);
+  if (!m) { m = new Map(); byObject.set(src, m); }
   let v = m.get(key);
   if (!v) {
     v = make();
-    if (m.size > 64) m.delete(m.keys().next().value);
+    if (v.data.length > MEMO_ITEM_MAX) return v;
+    if (m.size >= 16) m.delete(m.keys().next().value);
     m.set(key, v);
   }
   return v;

@@ -31,7 +31,7 @@ function authHeaders(token, extra) {
 
 /** Met en forme le profil renvoyé par Mojang. */
 export function normalizeAccountProfile(j) {
-  if (!j || typeof j.id !== 'string' || !/^[0-9a-f]{32}$/i.test(j.id) || typeof j.name !== 'string') {
+  if (!j || typeof j.id !== 'string' || !/^[0-9a-f]{32}$/i.test(j.id) || typeof j.name !== 'string' || !/^[A-Za-z0-9_]{1,25}$/.test(j.name)) {
     throw new SkinError('MOJANG_UNAVAILABLE', 'profil illisible');
   }
   const skins = (Array.isArray(j.skins) ? j.skins : []).map((s) => {
@@ -69,13 +69,14 @@ async function errorFromAccount(r, kind) {
   if (r.status === 403) return new SkinError('AUTH_REQUIRED', 'jeton refusé', { status: 403 });
   if (r.status === 404 && kind === 'profile') return new SkinError('NO_MINECRAFT', undefined, { status: 404 });
   if ((r.status === 400 || r.status === 404) && kind === 'cape') return new SkinError('CAPE_NOT_OWNED', undefined, { status: r.status });
+  if (r.status === 404 && kind === 'hide') return new SkinError('NO_MINECRAFT', undefined, { status: 404 });
   if (r.status === 400 && kind === 'skin') return new SkinError('SKIN_INVALID_FORMAT', 'refusé par Mojang', { status: 400 });
   return new SkinError('MOJANG_REJECTED', String(r.status), { status: r.status });
 }
 
-function afterChange(opts, profile) {
-  // Le skin a changé : on oublie le profil public gardé en cache.
-  try { opts.client?.cache?.delete?.(`profile:${profile.id}`); } catch { /* rien */ }
+async function afterChange(opts, profile) {
+  // Le skin a changé : on oublie le profil public gardé en cache (attendu, et sans jamais faire échouer).
+  try { await opts.client?.cache?.delete?.(`profile:${profile.id}`); } catch { /* rien */ }
   return profile;
 }
 
@@ -113,14 +114,14 @@ export async function setSkin(token, skin, opts = {}) {
     form.append('variant', model);
     form.append('file', new Blob([png], { type: 'image/png' }), 'skin.png');
     const p = await call(token, 'POST', `${API}/skins`, 'skin', { ...opts, body: form });
-    return afterChange(opts, p);
+    return await afterChange(opts, p);
   } catch (err) { throw toSkinError(err); }
 }
 
 /** Revient au skin par défaut. */
 export async function resetSkin(token, opts = {}) {
   try {
-    return afterChange(opts, await call(token, 'DELETE', `${API}/skins/active`, 'skin', opts));
+    return await afterChange(opts, await call(token, 'DELETE', `${API}/skins/active`, 'reset', opts));
   } catch (err) { throw toSkinError(err); }
 }
 
@@ -134,20 +135,22 @@ export async function setCape(token, capeId, opts = {}) {
     checkToken(token);
     if (typeof capeId !== 'string' || !CAPE_ID_RE.test(capeId)) throw new SkinError('CAPE_NOT_OWNED', 'identifiant invalide');
     const mine = await getProfile(token, opts);
-    if (!mine.capes.some((c) => c.id === capeId)) throw new SkinError('CAPE_NOT_OWNED');
+    const owned = mine.capes.find((c) => c.id.toLowerCase() === capeId.toLowerCase());
+    if (!owned) throw new SkinError('CAPE_NOT_OWNED');
+    capeId = owned.id;
     const p = await call(token, 'PUT', `${API}/capes/active`, 'cape', {
       ...opts,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ capeId }),
     });
-    return afterChange(opts, p);
+    return await afterChange(opts, p);
   } catch (err) { throw toSkinError(err); }
 }
 
 /** Cache ma cape (n'en porte aucune). */
 export async function hideCape(token, opts = {}) {
   try {
-    return afterChange(opts, await call(token, 'DELETE', `${API}/capes/active`, 'cape', opts));
+    return await afterChange(opts, await call(token, 'DELETE', `${API}/capes/active`, 'hide', opts));
   } catch (err) { throw toSkinError(err); }
 }
 

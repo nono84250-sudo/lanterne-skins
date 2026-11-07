@@ -86,6 +86,10 @@ export async function createViewer(container, opts = {}) {
   for (const [k, v] of [['width', width], ['height', height]]) {
     if (!Number.isFinite(v) || v < 16 || v > 8192) throw new SkinError('INVALID_OPTION', k);
   }
+  // Toutes les options vérifiées AVANT de réserver la carte graphique.
+  const firstAnimation = makeAnimation(lib, opts.animation, opts.speed);
+  if (opts.zoom !== undefined && (typeof opts.zoom !== 'number' || !(opts.zoom > 0) || opts.zoom > 10)) throw new SkinError('INVALID_OPTION', 'zoom');
+  if (opts.layers !== undefined && opts.layers !== true && opts.layers !== false && (typeof opts.layers !== 'object' || opts.layers === null)) throw new SkinError('INVALID_OPTION', 'layers');
   const canvas = document.createElement('canvas');
   container.appendChild(canvas);
   let viewer;
@@ -96,6 +100,8 @@ export async function createViewer(container, opts = {}) {
     throw new SkinError('NOT_SUPPORTED', '3D (WebGL) indisponible', { cause: err });
   }
   let current = { skin, cape, elytra: !!opts.elytra };
+  let skinSeq = 0, capeSeq = 0;
+  try {
   viewer.loadSkin(toCanvas(skin), { model: skin.model === 'slim' ? 'slim' : 'default' });
   const showCape = () => {
     if (current.cape) {
@@ -106,25 +112,35 @@ export async function createViewer(container, opts = {}) {
   };
   showCape();
   applyLayers(viewer, opts.layers);
-  viewer.animation = makeAnimation(lib, opts.animation, opts.speed);
+  viewer.animation = firstAnimation;
   viewer.autoRotate = !!opts.autoRotate;
-  if (opts.zoom !== undefined) {
-    if (typeof opts.zoom !== 'number' || !(opts.zoom > 0) || opts.zoom > 10) throw new SkinError('INVALID_OPTION', 'zoom');
-    viewer.zoom = opts.zoom;
-  }
+  if (opts.zoom !== undefined) viewer.zoom = opts.zoom;
   if (opts.background !== undefined) viewer.background = opts.background;
+  } catch (err) {
+    viewer.dispose();
+    canvas.remove();
+    throw err instanceof SkinError ? err : new SkinError('INVALID_OPTION', undefined, { cause: err });
+  }
 
   return {
     /** Le canvas affiché. */
     canvas,
     /** Change le skin affiché (aperçu avant d'appliquer, par exemple). */
     async setSkin(next) {
+      const seq = ++skinSeq;
       const s = await asSkin(next);
+      if (seq !== skinSeq) return; // un appel plus récent a gagné
       current.skin = s;
       viewer.loadSkin(toCanvas(s), { model: s.model === 'slim' ? 'slim' : 'default' });
     },
     /** Change ou enlève (null) la cape. */
-    async setCape(next) { current.cape = await asCape(next); showCape(); },
+    async setCape(next) {
+      const seq = ++capeSeq;
+      const c = await asCape(next);
+      if (seq !== capeSeq) return;
+      current.cape = c;
+      showCape();
+    },
     /** Cape ou élytres. */
     setElytra(on) { current.elytra = !!on; showCape(); },
     setAnimation(name, speed) { viewer.animation = makeAnimation(lib, name, speed); },
@@ -136,7 +152,10 @@ export async function createViewer(container, opts = {}) {
     resetCamera() { viewer.resetCameraPose(); },
     /** Libère la carte graphique et retire le canvas. */
     dispose() { viewer.dispose(); canvas.remove(); },
-    /** Accès direct à skinview3d pour les usages avancés. */
+    /**
+     * Accès direct à skinview3d pour les usages avancés. Attention : ses fonctions acceptent
+     * des adresses web ; ne jamais lui donner d'adresse qui ne soit pas officielle.
+     */
     get raw() { return viewer; },
   };
 }

@@ -32,15 +32,25 @@ async function atomicWrite(file, data) {
   }
 }
 
-async function readSmall(file) {
+/**
+ * Lit un petit fichier normal (pas un lien symbolique). Absent → undefined.
+ * strict : les autres erreurs (fichier verrouillé, droits…) sont relancées au lieu d'être prises pour « vide ».
+ */
+async function readSmall(file, { strict = false } = {}) {
   try {
-    const st = await fs.stat(file);
-    if (!st.isFile() || st.size > MAX_FILE) return undefined;
+    const st = await fs.lstat(file);
+    if (!st.isFile() || st.size > MAX_FILE) {
+      if (strict) throw new SkinError('STORAGE_FAILED', 'fichier inattendu');
+      return undefined;
+    }
     return await fs.readFile(file);
-  } catch {
-    return undefined;
+  } catch (err) {
+    if (!strict || (err && err.code === 'ENOENT')) return undefined;
+    throw err;
   }
 }
+
+const MAX_DATA_TTL = 30 * 24 * 3600 * 1000;
 
 function checkDir(dir) {
   if (typeof dir !== 'string' || !dir.trim()) throw new SkinError('INVALID_OPTION', 'dossier');
@@ -59,7 +69,7 @@ export function createFileCache(dir) {
     const m = /^texture:([0-9a-f]{16,128})$/.exec(key);
     return m ? m[1] : null;
   };
-  return {
+  const api = {
     async get(key) {
       const h = texKey(key);
       if (h) {
@@ -70,7 +80,11 @@ export function createFileCache(dir) {
       if (!b) return undefined;
       try {
         const e = JSON.parse(b.toString('utf8'));
-        if (!e || e.key !== key || typeof e.exp !== 'number' || e.exp <= Date.now()) return undefined;
+        if (!e || e.key !== key || typeof e.exp !== 'number' || e.exp > Date.now() + MAX_DATA_TTL) return undefined;
+        if (e.exp <= Date.now()) {
+          await fs.rm(dataFile(key), { force: true }).catch(() => {}); // périmé : effacé (aucun historique gardé)
+          return undefined;
+        }
         return e.value;
       } catch {
         return undefined; // fichier abîmé : on refait la demande
@@ -82,21 +96,43 @@ export function createFileCache(dir) {
         if (!(value instanceof Uint8Array) || !isPng(value)) return;
         return atomicWrite(texFile(h), value);
       }
-      const exp = ttlMs === Infinity ? Number.MAX_SAFE_INTEGER : Date.now() + ttlMs;
+      const exp = Date.now() + Math.min(ttlMs, MAX_DATA_TTL);
       return atomicWrite(dataFile(key), JSON.stringify({ key, exp, value }));
     },
     async delete(key) {
       const h = texKey(key);
       await fs.rm(h ? texFile(h) : dataFile(key), { force: true });
     },
+    /** Efface les données périmées (profils des autres joueurs, etc.). */
+    async prune() {
+      const dir = path.join(root, 'data');
+      let names = [];
+      try { names = await fs.readdir(dir); } catch { return 0; }
+      let n = 0;
+      for (const f of names) {
+        const full = path.join(dir, f);
+        let drop = !/^[0-9a-f]{64}\.json$/.test(f);
+        if (!drop) {
+          const b = await readSmall(full);
+          try { const e = JSON.parse(b.toString('utf8')); drop = !(typeof e.exp === 'number' && e.exp > Date.now() && e.exp <= Date.now() + MAX_DATA_TTL); } catch { drop = true; }
+        }
+        if (drop) { await fs.rm(full, { force: true }).catch(() => {}); n++; }
+      }
+      return n;
+    },
     async clear() {
       await fs.rm(path.join(root, 'textures'), { recursive: true, force: true });
       await fs.rm(path.join(root, 'data'), { recursive: true, force: true });
     },
   };
+  // Au démarrage, on efface les données périmées (en arrière-plan, sans jamais bloquer).
+  const t = setTimeout(() => { api.prune().catch(() => {}); }, 0);
+  if (t.unref) t.unref();
+  return api;
 }
 
 const ID_RE = /^[0-9a-f]{16}$/;
+const queues = new Map();
 const MAX_ITEMS = 500;
 
 function cleanName(name) {
@@ -115,15 +151,19 @@ export function createWardrobe(dir) {
   const root = checkDir(dir);
   const indexFile = path.join(root, 'index.json');
   const pngFile = (id) => path.join(root, `${id}.png`);
-  let chain = Promise.resolve();
+  // Une seule file d'attente par dossier, même avec plusieurs createWardrobe() sur le même dossier.
   const serial = (fn) => {
-    const p = chain.then(fn);
-    chain = p.catch(() => {});
+    const prev = queues.get(root) || Promise.resolve();
+    const p = prev.then(fn);
+    const tail = p.catch(() => {});
+    queues.set(root, tail);
+    tail.then(() => { if (queues.get(root) === tail) queues.delete(root); });
     return p.catch((err) => { throw toSkinError(err); });
   };
 
   async function readIndex() {
-    const b = await readSmall(indexFile);
+    // Un fichier verrouillé un instant (antivirus…) ne doit jamais être pris pour une garde-robe vide.
+    const b = await readSmall(indexFile, { strict: true });
     if (!b) return [];
     try {
       const j = JSON.parse(b.toString('utf8'));
@@ -131,6 +171,8 @@ export function createWardrobe(dir) {
         id: e.id, name: cleanName(e.name), model: e.model, addedAt: typeof e.addedAt === 'string' ? e.addedAt : '',
       })) : [];
     } catch {
+      // Index illisible : on le met de côté au lieu de l'écraser.
+      await fs.rename(indexFile, `${indexFile}.abime-${Date.now()}`).catch(() => {});
       return [];
     }
   }
@@ -139,6 +181,15 @@ export function createWardrobe(dir) {
   function need(id) {
     if (typeof id !== 'string' || !ID_RE.test(id)) throw new SkinError('INVALID_OPTION', 'identifiant');
     return id;
+  }
+
+  async function readEntry(id) {
+    need(id);
+    const entry = (await readIndex()).find((e) => e.id === id);
+    if (!entry) throw new SkinError('INVALID_OPTION', 'skin absent');
+    const b = await readSmall(pngFile(id));
+    if (!b || !isPng(b)) throw new SkinError('STORAGE_FAILED', 'fichier absent ou abîmé');
+    return { entry, bytes: new Uint8Array(b) };
   }
 
   return {
@@ -164,22 +215,13 @@ export function createWardrobe(dir) {
     }),
 
     /** Octets PNG d'un skin rangé. */
-    getBytes: (id) => serial(async () => {
-      need(id);
-      const items = await readIndex();
-      if (!items.some((e) => e.id === id)) throw new SkinError('INVALID_OPTION', 'skin absent');
-      const b = await readSmall(pngFile(id));
-      if (!b) throw new SkinError('STORAGE_FAILED', 'fichier absent');
-      return new Uint8Array(b);
-    }),
+    getBytes: (id) => serial(async () => (await readEntry(id)).bytes),
 
     /** Skin rangé, prêt à afficher. */
-    async get(id) {
-      const items = await this.list();
-      const e = items.find((x) => x.id === need(id));
-      if (!e) throw new SkinError('INVALID_OPTION', 'skin absent');
-      return loadSkin(await this.getBytes(id), { model: e.model });
-    },
+    get: (id) => serial(async () => {
+      const { entry, bytes } = await readEntry(id);
+      return loadSkin(bytes, { model: entry.model });
+    }),
 
     rename: (id, name) => serial(async () => {
       need(id);

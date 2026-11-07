@@ -72,7 +72,7 @@ export function readHeader(bytes) {
 export async function decodePng(bytes, opts = {}) {
   const h = readHeader(bytes);
   if (opts.checkSize) opts.checkSize(h.width, h.height);
-  const maxPixels = opts.maxPixels ?? 4096 * 4096;
+  const maxPixels = opts.maxPixels ?? 1024 * 1024;
   if (h.width * h.height > maxPixels) throw new PngError('SIZE', 'image trop grande');
 
   // Parcours des blocs.

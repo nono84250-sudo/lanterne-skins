@@ -8,10 +8,13 @@ import { SkinError, toSkinError } from '../errors.js';
 import { request, commonStatusError, parseJson, createRateLimiter } from './net.js';
 import { createMemoryCache, PROFILE_TTL, NAME_TTL, NOT_FOUND_TTL, TEXTURE_TTL } from './cache.js';
 import { fromBase64 } from '../core/image.js';
+import { isPng, readHeader } from '../png/png.js';
 import { loadSkin, loadCape, DEFAULT_MAX_BYTES, checkModel } from '../core/skin.js';
 import { defaultSkinFor } from './defaults.js';
 
 const NAME_RE = /^[A-Za-z0-9_]{1,16}$/;
+// Pseudos renvoyés par Mojang : quelques très vieux comptes dépassent 16 caractères.
+const PROFILE_NAME_RE = /^[A-Za-z0-9_]{1,25}$/;
 const UUID_RE = /^[0-9a-f]{32}$/i;
 const UUID_DASHED_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HASH_RE = /^[0-9a-f]{16,128}$/;
@@ -51,7 +54,7 @@ export function textureUrl(hashOrUrl) {
 
 /** Lit le champ « textures » (base64) d'un profil de sessionserver. */
 export function parseProfile(json) {
-  if (!json || typeof json.id !== 'string' || !UUID_RE.test(json.id) || typeof json.name !== 'string') {
+  if (!json || typeof json.id !== 'string' || !UUID_RE.test(json.id) || typeof json.name !== 'string' || !PROFILE_NAME_RE.test(json.name)) {
     throw new SkinError('MOJANG_UNAVAILABLE', 'profil illisible');
   }
   const id = json.id.toLowerCase();
@@ -73,6 +76,41 @@ export function parseProfile(json) {
   return { id, uuid: dashUuid(id), name: json.name, skin, cape, isDefaultSkin };
 }
 
+/** Revérifie un profil lu dans le cache (un cache peut avoir été modifié par quelqu'un d'autre). */
+export function validCachedProfile(p, id) {
+  if (!p || typeof p !== 'object' || p.id !== id || typeof p.name !== 'string' || !PROFILE_NAME_RE.test(p.name)) return null;
+  const s = p.skin && textureFromUrl(p.skin.url);
+  if (!s || s.hash !== p.skin.hash || (p.skin.model !== 'classic' && p.skin.model !== 'slim')) return null;
+  let cape = null;
+  if (p.cape) {
+    cape = textureFromUrl(p.cape.url);
+    if (!cape || cape.hash !== p.cape.hash) return null;
+  }
+  const skin = { url: s.url, hash: s.hash, model: p.skin.model };
+  if (typeof p.skin.defaultName === 'string' && /^[a-z]{1,16}$/.test(p.skin.defaultName)) skin.defaultName = p.skin.defaultName;
+  return { id, uuid: dashUuid(id), name: p.name, skin, cape, isDefaultSkin: p.isDefaultSkin === true };
+}
+
+/** Accepte seulement une image PNG de taille Minecraft (skin 64×64/64×32, cape 64×32). */
+function checkTextureBytes(b) {
+  if (!(b instanceof Uint8Array) || !isPng(b)) return false;
+  try {
+    const h = readHeader(b);
+    return h.width === 64 && (h.height === 64 || h.height === 32);
+  } catch { return false; }
+}
+
+/** Attend une promesse partagée, mais abandonne (pour cet appelant seulement) si son signal est annulé. */
+function withSignal(p, signal) {
+  if (!signal) return p;
+  if (signal.aborted) return Promise.reject(new SkinError('CANCELLED'));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new SkinError('CANCELLED'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    p.then((v) => { signal.removeEventListener('abort', onAbort); resolve(v); }, (e) => { signal.removeEventListener('abort', onAbort); reject(e); });
+  });
+}
+
 /**
  * Crée un client Mojang (avec son propre cache et sa limite de requêtes).
  * @param {{cache?: object, fetch?: typeof fetch, timeout?: number,
@@ -85,13 +123,16 @@ export function createClient(opts = {}) {
   const base = { fetch: opts.fetch, timeout: opts.timeout, limiter };
   const inflight = new Map();
 
-  function once(key, fn) {
+  // Demandes identiques simultanées regroupées. La requête partagée n'utilise le signal
+  // de personne (seulement le délai max) ; chaque appelant peut abandonner de son côté.
+  function once(key, fn, signal) {
     let p = inflight.get(key);
     if (!p) {
       p = Promise.resolve().then(fn).finally(() => inflight.delete(key));
+      p.catch(() => {});
       inflight.set(key, p);
     }
-    return p;
+    return withSignal(p, signal);
   }
 
   async function cacheGet(key) {
@@ -105,9 +146,10 @@ export function createClient(opts = {}) {
     const key = `name:${name.toLowerCase()}`;
     const hit = await cacheGet(key);
     if (hit === null) throw new SkinError('PLAYER_NOT_FOUND');
-    if (hit) return hit;
+    if (typeof hit === 'string' && UUID_RE.test(hit)) return hit.toLowerCase();
+    if (signal && signal.aborted) throw new SkinError('CANCELLED');
     return once(key, async () => {
-      const r = await request(`https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(name)}`, { ...base, signal });
+      const r = await request(`https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(name)}`, base);
       const e = commonStatusError(r);
       if (e) throw e;
       if (r.status === 204 || r.status === 404) {
@@ -121,16 +163,18 @@ export function createClient(opts = {}) {
       const id = j.id.toLowerCase();
       await cacheSet(key, id, NAME_TTL);
       return id;
-    });
+    }, signal);
   }
 
   async function profile(id, signal) {
     const key = `profile:${id}`;
     const hit = await cacheGet(key);
     if (hit === null) throw new SkinError('PLAYER_NOT_FOUND');
-    if (hit) return hit;
+    const valid = hit && validCachedProfile(hit, id);
+    if (valid) return valid;
+    if (signal && signal.aborted) throw new SkinError('CANCELLED');
     return once(key, async () => {
-      const r = await request(`https://sessionserver.mojang.com/session/minecraft/profile/${id}`, { ...base, signal });
+      const r = await request(`https://sessionserver.mojang.com/session/minecraft/profile/${id}`, base);
       const e = commonStatusError(r);
       if (e) throw e;
       if (r.status === 204 || r.status === 404) {
@@ -143,7 +187,7 @@ export function createClient(opts = {}) {
       if (p.id !== id) throw new SkinError('MOJANG_UNAVAILABLE', 'profil inattendu');
       await cacheSet(key, p, profileTtl);
       return p;
-    });
+    }, signal);
   }
 
   /**
@@ -168,16 +212,20 @@ export function createClient(opts = {}) {
       const { hash, url } = textureUrl(hashOrUrl);
       const key = `texture:${hash}`;
       const hit = await cacheGet(key);
-      if (hit instanceof Uint8Array) return hit;
-      return await once(key, async () => {
-        const r = await request(url, { ...base, signal, maxBytes: DEFAULT_MAX_BYTES });
+      if (checkTextureBytes(hit)) return hit.slice(); // copie : le cache reste intact
+      if (signal && signal.aborted) throw new SkinError('CANCELLED');
+      const bytes = await once(key, async () => {
+        const r = await request(url, { ...base, maxBytes: DEFAULT_MAX_BYTES });
         const e = commonStatusError(r);
         if (e) throw e;
         if (r.status === 404) throw new SkinError('MOJANG_REJECTED', 'texture introuvable', { status: 404 });
         if (r.status !== 200) throw new SkinError('MOJANG_REJECTED', String(r.status), { status: r.status });
-        await cacheSet(key, r.bytes, TEXTURE_TTL);
+        // Jamais de page d'erreur, de SVG ou d'autre chose gardé « pour toujours » : seulement un PNG Minecraft.
+        if (!checkTextureBytes(r.bytes)) throw new SkinError('SKIN_INVALID_FORMAT', 'texture reçue invalide');
+        await cacheSet(key, r.bytes.slice(), TEXTURE_TTL);
         return r.bytes;
-      });
+      }, signal);
+      return bytes.slice();
     } catch (err) {
       throw toSkinError(err);
     }
