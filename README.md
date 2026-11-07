@@ -48,6 +48,10 @@ await v.setSkin(autreSkin);       // aperçu avant d'appliquer
 v.dispose();
 ```
 
+`v.raw` donne accès direct à skinview3d (usages avancés) : ses fonctions acceptent des adresses web, ne jamais lui en donner une qui ne soit pas officielle.
+
+Tailles : `renderHead` prend `size` (taille finale en pixels), `renderFront` et `renderCape` prennent `scale` (pixels par pixel du skin), pour garder des pixels nets.
+
 Changer son skin (launcher). La connexion Microsoft est faite par le launcher **avec son propre client ID** ; la bibliothèque reçoit seulement le jeton Minecraft et ne le garde jamais :
 
 ```js
@@ -91,7 +95,8 @@ Autres codes : INVALID_NAME, SKIN_TOO_LARGE, CAPE_INVALID_FORMAT, CAPE_INVALID_S
 - Images de `textures.minecraft.net` : gardées **pour toujours** (un même lien ne change jamais).
 - Profil (quel skin porte le joueur) : **10 minutes** (`profileTtl`). « Joueur inexistant » : 1 minute.
 - Rendus (têtes déjà dessinées) : gardés en mémoire tant que le skin existe.
-- Par défaut en mémoire ; `createFileCache()` pour le PC ; sur le site, `cacheHeaders('texture' | 'profile')` donne les en-têtes pour le cache de Cloudflare ou Vercel.
+- Par défaut en mémoire ; `createFileCache()` pour le PC (les données périmées sont effacées au démarrage, ou avec `prune()`) ; sur le site, `cacheHeaders(type)` donne les en-têtes pour le cache de Cloudflare ou Vercel : `'texture'` et `'render-by-hash'` (pour toujours), `'profile'` et `'render'` (10 minutes).
+- Les cache sont toujours revérifiés à la lecture : un fichier de cache modifié par un autre programme ne peut pas faire afficher une adresse non officielle.
 - Limite de requêtes intégrée (300 par 10 s par client, sous la limite Mojang d'environ 400) et demandes identiques simultanées regroupées.
 
 ## Ce qui n'est pas possible (volontairement)

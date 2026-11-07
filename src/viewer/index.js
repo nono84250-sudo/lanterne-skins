@@ -99,10 +99,8 @@ export async function createViewer(container, opts = {}) {
     canvas.remove();
     throw new SkinError('NOT_SUPPORTED', '3D (WebGL) indisponible', { cause: err });
   }
-  let current = { skin, cape, elytra: !!opts.elytra };
+  const current = { skin, cape, elytra: !!opts.elytra };
   let skinSeq = 0, capeSeq = 0;
-  try {
-  viewer.loadSkin(toCanvas(skin), { model: skin.model === 'slim' ? 'slim' : 'default' });
   const showCape = () => {
     if (current.cape) {
       viewer.loadCape(toCanvas(current.cape), { backEquipment: current.elytra ? 'elytra' : 'cape' });
@@ -110,12 +108,14 @@ export async function createViewer(container, opts = {}) {
       viewer.loadCape(null);
     }
   };
-  showCape();
-  applyLayers(viewer, opts.layers);
-  viewer.animation = firstAnimation;
-  viewer.autoRotate = !!opts.autoRotate;
-  if (opts.zoom !== undefined) viewer.zoom = opts.zoom;
-  if (opts.background !== undefined) viewer.background = opts.background;
+  try {
+    viewer.loadSkin(toCanvas(skin), { model: skin.model === 'slim' ? 'slim' : 'default' });
+    showCape();
+    applyLayers(viewer, opts.layers);
+    viewer.animation = firstAnimation;
+    viewer.autoRotate = !!opts.autoRotate;
+    if (opts.zoom !== undefined) viewer.zoom = opts.zoom;
+    if (opts.background !== undefined) viewer.background = opts.background;
   } catch (err) {
     viewer.dispose();
     canvas.remove();
