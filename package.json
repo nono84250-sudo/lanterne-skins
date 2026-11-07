@@ -1,0 +1,25 @@
+{
+  "name": "lanterne-skins",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Têtes, skins et capes Minecraft (lecture Mojang, rendus 2D, visualiseur 3D, changement de skin). Zéro dépendance, aucun service tiers.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./node": "./src/node/index.js",
+    "./viewer": "./src/viewer/index.js",
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "sideEffects": false,
+  "files": ["src", "README.md", "README.en.md", "SECURITY.md", "CHANGELOG.md", "LICENSE", "THIRD-PARTY-NOTICES.md"],
+  "scripts": {
+    "test": "node test/run.js",
+    "test:browser": "node test/browser/run-browser.js",
+    "test:live": "node test/live/run-live.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
