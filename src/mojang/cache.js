@@ -10,7 +10,8 @@
 export const PROFILE_TTL = 10 * 60 * 1000;
 export const NAME_TTL = 10 * 60 * 1000;
 export const NOT_FOUND_TTL = 60 * 1000;
-export const TEXTURE_TTL = Infinity;
+// « Pour toujours » = un an (un nombre fini : certains caches Redis/KV refusent Infinity).
+export const TEXTURE_TTL = 365 * 24 * 3600 * 1000;
 
 export function createMemoryCache({ maxEntries = 2000 } = {}) {
   const map = new Map();

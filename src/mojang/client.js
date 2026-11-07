@@ -100,7 +100,7 @@ export function validCachedProfile(p, id) {
 
 /** Accepte seulement une image PNG de taille Minecraft (skin 64×64/64×32, cape 64×32). */
 function checkTextureBytes(b) {
-  if (!(b instanceof Uint8Array) || !isPng(b)) return false;
+  if (!(b instanceof Uint8Array) || b.length > DEFAULT_MAX_BYTES || !isPng(b)) return false;
   try {
     const h = readHeader(b);
     return h.width === 64 && (h.height === 64 || h.height === 32);
@@ -179,6 +179,10 @@ export function createClient(opts = {}) {
     }, signal);
   }
 
+  // Numéro de version par joueur : augmenté quand son skin change, pour qu'une réponse
+  // plus ancienne encore en route ne réécrive pas l'ancien profil dans le cache.
+  const generation = new Map();
+
   async function profile(id, signal) {
     const key = `profile:${id}`;
     const hit = await cacheGet(key);
@@ -186,6 +190,7 @@ export function createClient(opts = {}) {
     const valid = hit && validCachedProfile(hit, id);
     if (valid) return valid;
     if (signal && signal.aborted) throw new SkinError('CANCELLED');
+    const gen = generation.get(id) || 0;
     return once(key, async () => {
       const r = await request(`https://sessionserver.mojang.com/session/minecraft/profile/${id}`, base);
       const e = commonStatusError(r);
@@ -198,7 +203,7 @@ export function createClient(opts = {}) {
       if (r.status !== 200) throw new SkinError('MOJANG_REJECTED', String(r.status), { status: r.status });
       const p = parseProfile(parseJson(r));
       if (p.id !== id) throw new SkinError('MOJANG_UNAVAILABLE', 'profil inattendu');
-      await cacheSet(key, p, profileTtl);
+      if ((generation.get(id) || 0) === gen) await cacheSet(key, p, profileTtl);
       return p;
     }, signal);
   }
@@ -275,7 +280,31 @@ export function createClient(opts = {}) {
     return trustHash(await loadCape(bytes, { hash: p.cape.hash }), p.cape.hash);
   }
 
-  return { getPlayer, getTexture, getSkin, getCape, cache };
+  /**
+   * À appeler quand le skin ou la cape d'un joueur vient de changer (fait automatiquement par
+   * account.* avec { client }). Si le profil du compte est donné, il est utilisé tout de suite,
+   * car Mojang peut encore renvoyer l'ancien skin pendant quelques instants.
+   */
+  async function invalidate(id, accountProfile) {
+    if (typeof id !== 'string' || !UUID_RE.test(id)) return;
+    id = id.toLowerCase();
+    const key = `profile:${id}`;
+    generation.set(id, (generation.get(id) || 0) + 1);
+    inflight.delete(key);
+    try { await cache.delete?.(key); } catch { /* rien */ }
+    if (accountProfile && accountProfile.id === id) {
+      const s = accountProfile.activeSkin;
+      const fresh = validCachedProfile({
+        id, name: accountProfile.name,
+        skin: s ? { url: s.url, hash: s.hash, model: s.model } : defaultSkinFor(id),
+        cape: accountProfile.activeCape ? { url: accountProfile.activeCape.url, hash: accountProfile.activeCape.hash } : null,
+        isDefaultSkin: !s,
+      }, id);
+      if (fresh) await cacheSet(key, fresh, profileTtl);
+    }
+  }
+
+  return { getPlayer, getTexture, getSkin, getCape, invalidate, cache };
 }
 
 function structuredCloneSafe(p) {

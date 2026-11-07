@@ -40,6 +40,7 @@ function cached(src, key, make) {
   }
   let m = byObject.get(src);
   if (!m) { m = new Map(); byObject.set(src, m); }
+  key = `${crc32(src.data)}:${key}`; // un skin modifié sur place est redessiné
   let v = m.get(key);
   if (!v) {
     v = make();
