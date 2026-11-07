@@ -6,7 +6,7 @@
 
 import { SkinError } from '../errors.js';
 import { RgbaImage, blit } from './image.js';
-import { Skin, Cape } from './skin.js';
+import { Skin, Cape, trustedHash } from './skin.js';
 
 const MAX_OUT = 2048;
 // Rendus gardés en mémoire, avec un budget total (un serveur peut recevoir des tailles variées).
@@ -19,8 +19,9 @@ let byHashBytes = 0;
 const byObject = new WeakMap();
 
 function cached(src, key, make) {
-  if (typeof src.hash === 'string') {
-    const k = `${src.hash}:${src.model || ''}:${key}`;
+  const hash = trustedHash(src);
+  if (hash) {
+    const k = `${hash}:${src.model || ''}:${key}`;
     const hit = byHash.get(k);
     if (hit) { byHash.delete(k); byHash.set(k, hit); return hit; }
     const v = make();

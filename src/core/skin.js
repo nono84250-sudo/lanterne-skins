@@ -4,6 +4,14 @@ import { RgbaImage, blit } from './image.js';
 
 export const DEFAULT_MAX_BYTES = 64 * 1024;
 
+// Empreintes Mojang confirmées par la bibliothèque elle-même (images réellement venues de
+// textures.minecraft.net). Seules celles-ci servent à partager les rendus gardés en mémoire.
+const trusted = new WeakMap();
+/** @internal */
+export function trustHash(obj, hash) { trusted.set(obj, hash); return obj; }
+/** @internal */
+export function trustedHash(obj) { return trusted.get(obj); }
+
 /**
  * Transforme ce que l'appelant donne (Uint8Array, Buffer, ArrayBuffer, Blob/File)
  * en octets, en refusant les fichiers trop gros AVANT de les lire en entier.
@@ -124,7 +132,11 @@ export class Skin extends RgbaImage {
  */
 export async function loadSkin(input, opts = {}) {
   if (input instanceof Skin) {
-    if (opts.model && opts.model !== input.model) return new Skin(input, { ...input, model: checkModel(opts.model) });
+    if (opts.model && opts.model !== input.model) {
+      const s = new Skin(input, { ...input, model: checkModel(opts.model) });
+      const h = trustedHash(input);
+      return h ? trustHash(s, h) : s;
+    }
     return input;
   }
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
