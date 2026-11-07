@@ -111,6 +111,13 @@ export async function request(rawUrl, opts = {}) {
         continue;
       }
       if (res.type === 'opaqueredirect' || res.status === 0) throw new SkinError('MOJANG_UNAVAILABLE', 'redirection');
+      // Un fetch fourni par l'appelant qui suivrait lui-même les redirections : refusé.
+      if (res.redirected === true) throw new SkinError('MOJANG_UNAVAILABLE', 'redirection suivie par fetch');
+      if (res.url) {
+        let same = false;
+        try { same = new URL(res.url).href === url.href; } catch { same = false; }
+        if (!same) { try { checkUrl(res.url); } catch (err) { throw err; } }
+      }
       const bytes = await readCapped(res, maxBytes, () => timedOut, userSignal, url);
       return { status: res.status, headers: res.headers, bytes, url: url.href };
     } finally {

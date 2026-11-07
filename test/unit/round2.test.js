@@ -153,3 +153,22 @@ test('cape abîmée : code d’erreur de cape', async () => {
     await assert.rejects(createClient().getCape({ skin: { hash: H, model: 'classic' }, cape: { hash: H } }), code('CAPE_INVALID_FORMAT'));
   } finally { await srv.close(); }
 });
+
+test('tour 3 : garde-robe → octets toujours redessinés, image trafiquée refusée', async () => {
+  const dir = await tmpDir();
+  const w = createWardrobe(dir);
+  const e = await w.add(testSkin());
+  await fs.writeFile(path.join(dir, `${e.id}.png`), testSkin({ extra: [pngChunk('tEXt', Buffer.from('x\0<script>'))] }));
+  assert.equal(Buffer.from(await w.getBytes(e.id)).includes(Buffer.from('<script>')), false);
+  const { rawPng } = await import('../helpers.js');
+  await fs.writeFile(path.join(dir, `${e.id}.png`), rawPng({ w: 4000, h: 1, pixel: () => [0, 0, 0, 255] }));
+  await assert.rejects(w.getBytes(e.id), code('STORAGE_FAILED'));
+});
+
+test('tour 3 : fetch qui suit lui-même une redirection vers ailleurs → refusé', async () => {
+  const fetch = async () => Object.assign(new Response(JSON.stringify({ id: '069a79f444e94726a5befca90e38aaf5', name: 'Bob' }), { status: 200 }), {});
+  const f1 = async (u, i) => { const r = await fetch(u, i); Object.defineProperty(r, 'redirected', { value: true }); return r; };
+  const f2 = async (u, i) => { const r = await fetch(u, i); Object.defineProperty(r, 'url', { value: 'https://evil.com/' }); return r; };
+  await assert.rejects(createClient({ fetch: f1 }).getPlayer('Bob'), code('MOJANG_UNAVAILABLE'));
+  await assert.rejects(createClient({ fetch: f2 }).getPlayer('Bob'), code('HOST_NOT_ALLOWED'));
+});

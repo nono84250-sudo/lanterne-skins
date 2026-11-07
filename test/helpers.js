@@ -74,7 +74,8 @@ const realFetch = globalThis.fetch;
 export function mirrorTo(port) {
   globalThis.fetch = (url, init) => {
     const u = new URL(String(url));
-    return realFetch(`https://localhost:${port}/${u.host}${u.pathname}${u.search}`, init);
+    return realFetch(`https://localhost:${port}/${u.host}${u.pathname}${u.search}`, init)
+      .then((r) => Object.defineProperty(r, 'url', { value: String(url) })); // comme si on parlait au vrai site
   };
   return () => { globalThis.fetch = realFetch; };
 }
