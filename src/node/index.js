@@ -10,7 +10,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { SkinError, toSkinError } from '../errors.js';
 import { isPng, encodePng } from '../png/png.js';
-import { loadSkin, checkModel } from '../core/skin.js';
+import { loadSkin, checkModel, DEFAULT_MAX_BYTES } from '../core/skin.js';
+import { constants as FS } from 'node:fs';
 
 const MAX_FILE = 1024 * 1024;
 
@@ -55,7 +56,13 @@ async function readSmall(file, { strict = false } = {}) {
       if (strict) throw new SkinError('STORAGE_FAILED', 'fichier inattendu');
       return undefined;
     }
-    return await fs.readFile(file);
+    // Ouverture sans suivre un lien symbolique (là où le système le permet), puis lecture par le même descripteur.
+    const fh = await fs.open(file, FS.O_RDONLY | (FS.O_NOFOLLOW || 0));
+    try {
+      const st2 = await fh.stat();
+      if (!st2.isFile() || st2.size > MAX_FILE) throw Object.assign(new Error('fichier inattendu'), { code: 'EINVAL' });
+      return await fh.readFile();
+    } finally { await fh.close(); }
   } catch (err) {
     if (!strict || (err && err.code === 'ENOENT')) return undefined;
     throw err;
@@ -64,7 +71,7 @@ async function readSmall(file, { strict = false } = {}) {
 
 const MAX_DATA_TTL = 30 * 24 * 3600 * 1000;
 // « Joueur introuvable » n'est gardé qu'une minute ; on refuse une entrée plantée qui durerait plus.
-const MAX_NULL_TTL = 5 * 60 * 1000;
+const MAX_NULL_TTL = 61 * 1000;
 const PRUNE_EVERY = 10 * 60 * 1000;
 
 async function realDirOnly(dir) {
@@ -224,7 +231,11 @@ export function createWardrobe(dir) {
     if (!entry) throw new SkinError('INVALID_OPTION', 'skin absent');
     const b = await readSmall(pngFile(id));
     if (!b || !isPng(b)) throw new SkinError('STORAGE_FAILED', 'fichier absent ou abîmé');
-    return { entry, bytes: new Uint8Array(b) };
+    if (b.length > DEFAULT_MAX_BYTES) throw new SkinError('STORAGE_FAILED', 'fichier trop gros');
+    // Toujours revérifié et redessiné : un fichier modifié sur le disque ne ressort jamais tel quel.
+    let skin;
+    try { skin = await loadSkin(new Uint8Array(b), { model: entry.model }); } catch { throw new SkinError('STORAGE_FAILED', 'fichier abîmé'); }
+    return { entry, skin, bytes: await encodePng(skin.source) };
   }
 
   return {
@@ -254,8 +265,7 @@ export function createWardrobe(dir) {
 
     /** Skin rangé, prêt à afficher. */
     get: (id) => serial(async () => {
-      const { entry, bytes } = await readEntry(id);
-      return loadSkin(bytes, { model: entry.model });
+      return (await readEntry(id)).skin;
     }),
 
     rename: (id, name) => serial(async () => {
