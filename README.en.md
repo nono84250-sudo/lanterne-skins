@@ -18,7 +18,7 @@ Runs in Node.js (≥ 20), Electron and the browser. Zero dependencies (the 3D vi
 | `account.getProfile/setSkin/resetSkin/setCape/hideCape(token, …)` | change **your own** account |
 | `createFileCache(dir)`, `createWardrobe(dir)` | disk cache and local wardrobe (`lanterne-skins/node`) |
 | `createClient({cache, timeout, rateLimit, profileTtl, fetch})` | client with its own cache |
-| `cacheHeaders('texture'|'profile')` | suggested HTTP cache headers for a website route |
+| `cacheHeaders('texture'|'render-by-hash'|'profile'|'render')` | suggested HTTP cache headers for a website route (forever / 10 minutes) |
 
 Rendered images are `RgbaImage` objects (`width`, `height`, `data` RGBA) with `toPNG()`, `toDataURL()` and `toImageData()`.
 
@@ -27,6 +27,16 @@ Mojang servers do not allow direct calls from a web page (CORS): call `getPlayer
 The library does not sign in with Microsoft and ships **no client ID**: your launcher signs in with its own client ID and passes the Minecraft access token, which is never stored or logged.
 
 ## Errors
+
+| Code | Message |
+|---|---|
+| PLAYER_NOT_FOUND | No Minecraft player with this name. |
+| SKIN_INVALID_FORMAT | The skin must be a PNG image. |
+| SKIN_INVALID_SIZE | The skin must be 64×64 or 64×32 pixels. |
+| CAPE_NOT_OWNED | You don't own this cape. |
+| AUTH_REQUIRED | Sign in with Microsoft to change your skin. |
+| RATE_LIMITED | Too many requests. Try again in a minute. |
+| MOJANG_UNAVAILABLE | Minecraft services are not responding. |
 
 Every error is a `SkinError` with a stable `code`, an English `message`, and `err.localized('fr')` for French.
 Codes: PLAYER_NOT_FOUND, INVALID_NAME, SKIN_INVALID_FORMAT, SKIN_INVALID_SIZE, SKIN_TOO_LARGE, CAPE_INVALID_FORMAT, CAPE_INVALID_SIZE, CAPE_NOT_OWNED, AUTH_REQUIRED, NO_MINECRAFT, RATE_LIMITED, MOJANG_UNAVAILABLE, MOJANG_REJECTED, HOST_NOT_ALLOWED, INSECURE_URL, CANCELLED, INVALID_OPTION, STORAGE_FAILED, DISK_FULL, NOT_SUPPORTED, INTERNAL.

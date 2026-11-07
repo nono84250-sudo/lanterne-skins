@@ -155,6 +155,16 @@ export function createFileCache(dir) {
         }
         if (drop) { await fs.rm(full, { force: true }).catch(() => {}); n++; }
       }
+      // Restes d'écritures interrompues dans textures/ (plus de 10 minutes).
+      const tdir = path.join(root, 'textures');
+      try {
+        await realDirOnly(tdir);
+        for (const f of await fs.readdir(tdir)) {
+          if (!f.endsWith('.part')) continue;
+          const full = path.join(tdir, f);
+          try { const st = await fs.lstat(full); if (Date.now() - st.mtimeMs >= PRUNE_EVERY) { await fs.rm(full, { force: true }); n++; } } catch { /* rien */ }
+        }
+      } catch { /* pas de dossier textures */ }
       return n;
     },
     async clear() {

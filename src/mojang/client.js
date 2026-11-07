@@ -141,7 +141,7 @@ export function createClient(opts = {}) {
   function once(key, fn, signal) {
     let p = inflight.get(key);
     if (!p) {
-      p = Promise.resolve().then(fn).finally(() => inflight.delete(key));
+      p = Promise.resolve().then(fn).finally(() => { if (inflight.get(key) === p) inflight.delete(key); });
       p.catch(() => {});
       inflight.set(key, p);
     }
@@ -182,6 +182,10 @@ export function createClient(opts = {}) {
   // Numéro de version par joueur : augmenté quand son skin change, pour qu'une réponse
   // plus ancienne encore en route ne réécrive pas l'ancien profil dans le cache.
   const generation = new Map();
+  // Après un changement de skin, le profil du compte fait foi pendant 2 minutes : Mojang peut encore
+  // renvoyer l'ancien skin, et ces réponses ne doivent pas l'écraser dans le cache.
+  const primedUntil = new Map();
+  const isPrimed = (id) => (primedUntil.get(id) || 0) > Date.now();
 
   async function profile(id, signal) {
     const key = `profile:${id}`;
@@ -203,7 +207,7 @@ export function createClient(opts = {}) {
       if (r.status !== 200) throw new SkinError('MOJANG_REJECTED', String(r.status), { status: r.status });
       const p = parseProfile(parseJson(r));
       if (p.id !== id) throw new SkinError('MOJANG_UNAVAILABLE', 'profil inattendu');
-      if ((generation.get(id) || 0) === gen) await cacheSet(key, p, profileTtl);
+      if ((generation.get(id) || 0) === gen && !isPrimed(id)) await cacheSet(key, p, profileTtl);
       return p;
     }, signal);
   }
@@ -300,7 +304,10 @@ export function createClient(opts = {}) {
         cape: accountProfile.activeCape ? { url: accountProfile.activeCape.url, hash: accountProfile.activeCape.hash } : null,
         isDefaultSkin: !s,
       }, id);
-      if (fresh) await cacheSet(key, fresh, profileTtl);
+      if (fresh) {
+        primedUntil.set(id, Date.now() + 120_000);
+        await cacheSet(key, fresh, profileTtl);
+      }
     }
   }
 

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import util from 'node:util';
-import { createClient, SkinError, loadSkin, renderHead, account, Skin } from '../../src/index.js';
+import { createClient, createMemoryCache, SkinError, loadSkin, renderHead, account, Skin } from '../../src/index.js';
 import { createFileCache, createWardrobe } from '../../src/node/index.js';
 import { RgbaImage } from '../../src/core/image.js';
 import { startServer, bytes, testSkin, tmpDir, pngChunk } from '../helpers.js';
@@ -236,4 +236,27 @@ test('tour 4 : skin quelconque modifié sur place → redessiné', async () => {
   const a = renderHead(s, { size: 8 });
   s.data.fill(0, (8 * 64 + 8) * 4, (8 * 64 + 48) * 4);
   assert.notDeepEqual([...a.data], [...renderHead(s, { size: 8 }).data]);
+});
+
+test('tour 5 : une demande partie pendant le changement ne remet pas l’ancien skin', async () => {
+  const ID = '069a79f444e94726a5befca90e38aaf5';
+  const OLD = 'aa'.repeat(32), NEW = 'bb'.repeat(32);
+  const { texturesValue } = await import('../helpers.js');
+  const fetch = async (u) => {
+    if (String(u).includes('sessionserver')) {
+      await new Promise((r) => setTimeout(r, 40)); // Mojang lent et encore sur l'ancien skin
+      return new Response(JSON.stringify({ id: ID, name: 'Notch', properties: [{ name: 'textures', value: texturesValue({ SKIN: { url: `http://textures.minecraft.net/texture/${OLD}` } }) }] }));
+    }
+    return new Response(JSON.stringify({ id: ID, name: 'Notch', skins: [{ id: 's', state: 'ACTIVE', url: `http://textures.minecraft.net/texture/${NEW}`, variant: 'CLASSIC' }], capes: [] }));
+  };
+  const slowCache = createMemoryCache();
+  const del = slowCache.delete.bind(slowCache);
+  slowCache.delete = async (k) => { await new Promise((r) => setTimeout(r, 10)); del(k); };
+  const client = createClient({ fetch, cache: slowCache });
+  const change = account.resetSkin('jeton-de-test-123456', { client, fetch });
+  await new Promise((r) => setTimeout(r, 2));
+  const during = client.getPlayer(ID);
+  await change; await during;
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal((await client.getPlayer(ID)).skin.hash, NEW);
 });
