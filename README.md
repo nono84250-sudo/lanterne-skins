@@ -96,7 +96,7 @@ Autres codes : INVALID_NAME, SKIN_TOO_LARGE, CAPE_INVALID_FORMAT, CAPE_INVALID_S
 - Profil (quel skin porte le joueur) : **10 minutes** (`profileTtl`). « Joueur inexistant » : 1 minute.
 - Rendus (têtes déjà dessinées) : gardés en mémoire tant que le skin existe.
 - Par défaut en mémoire ; `createFileCache()` pour le PC (les données périmées sont effacées au démarrage, ou avec `prune()`) ; sur le site, `cacheHeaders(type)` donne les en-têtes pour le cache de Cloudflare ou Vercel : `'texture'` et `'render-by-hash'` (pour toujours), `'profile'` et `'render'` (10 minutes).
-- Les cache sont toujours revérifiés à la lecture : un fichier de cache modifié par un autre programme ne peut pas faire afficher une adresse non officielle.
+- Les caches sont toujours revérifiés à la lecture : un fichier de cache modifié par un autre programme ne peut pas faire afficher une adresse non officielle.
 - Cache personnalisé (Redis, KV…) : un objet `{ get(clé), set(clé, valeur, duréeMs), delete(clé) }` ; `get` renvoie `undefined` ou `null` quand la clé manque.
 - Après `account.setSkin/resetSkin/setCape/hideCape`, passer `{ client }` (le client utilisé pour l'affichage) pour que le nouveau skin s'affiche tout de suite ; le client partagé de `getPlayer` est vidé automatiquement.
 - `createFileCache(...).close()` arrête le nettoyage automatique (utile sur un serveur).

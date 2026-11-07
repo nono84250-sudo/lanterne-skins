@@ -1,6 +1,6 @@
 # Code tiers embarqué
 
-Le visualiseur 3D (`src/viewer/vendor/skinview3d.esm.js`) embarque, sans modification, le code de ces projets sous licence MIT. Rien n'est chargé depuis Internet.
+Le visualiseur 3D (`src/viewer/vendor/skinview3d.esm.js`) embarque le code de ces projets, regroupé et minifié (esbuild) sans modification du code source, sous licence MIT. Rien n'est chargé depuis Internet.
 
 ## skinview3d 3.4.2
 
