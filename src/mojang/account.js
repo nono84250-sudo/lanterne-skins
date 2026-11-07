@@ -108,6 +108,9 @@ export async function setSkin(token, skin, opts = {}) {
   try {
     checkToken(token);
     const s = skin instanceof Skin ? skin : await loadSkin(skin);
+    if (!s.source || s.source.width !== 64 || s.source.height !== 64 || !s.source.data || s.source.data.length !== 64 * 64 * 4) {
+      throw new SkinError('SKIN_INVALID_SIZE');
+    }
     const model = opts.model ? checkModel(opts.model) : s.model;
     const png = await encodePng(s.source);
     const form = new FormData();

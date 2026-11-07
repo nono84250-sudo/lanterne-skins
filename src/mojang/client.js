@@ -9,7 +9,8 @@ import { request, commonStatusError, parseJson, createRateLimiter } from './net.
 import { createMemoryCache, PROFILE_TTL, NAME_TTL, NOT_FOUND_TTL, TEXTURE_TTL } from './cache.js';
 import { fromBase64 } from '../core/image.js';
 import { isPng, readHeader } from '../png/png.js';
-import { loadSkin, loadCape, DEFAULT_MAX_BYTES, checkModel } from '../core/skin.js';
+import { loadSkin, loadCape, DEFAULT_MAX_BYTES, checkModel, trustHash, decodeChecked } from '../core/skin.js';
+import { encodePng } from '../png/png.js';
 import { defaultSkinFor } from './defaults.js';
 
 const NAME_RE = /^[A-Za-z0-9_]{1,16}$/;
@@ -98,6 +99,12 @@ function checkTextureBytes(b) {
     const h = readHeader(b);
     return h.width === 64 && (h.height === 64 || h.height === 32);
   } catch { return false; }
+}
+
+/** Décode complètement puis réécrit l'image (PNG propre, sans rien d'autre que les pixels). */
+async function cleanTexture(b) {
+  const img = await decodeChecked(b, [[64, 64], [64, 32]], 'skin');
+  return encodePng(img);
 }
 
 /** Attend une promesse partagée, mais abandonne (pour cet appelant seulement) si son signal est annulé. */
@@ -212,7 +219,10 @@ export function createClient(opts = {}) {
       const { hash, url } = textureUrl(hashOrUrl);
       const key = `texture:${hash}`;
       const hit = await cacheGet(key);
-      if (checkTextureBytes(hit)) return hit.slice(); // copie : le cache reste intact
+      if (checkTextureBytes(hit)) {
+        const clean = await cleanTexture(hit).catch(() => null); // revérifiée même depuis le cache
+        if (clean) return clean;
+      }
       if (signal && signal.aborted) throw new SkinError('CANCELLED');
       const bytes = await once(key, async () => {
         const r = await request(url, { ...base, maxBytes: DEFAULT_MAX_BYTES });
@@ -222,8 +232,9 @@ export function createClient(opts = {}) {
         if (r.status !== 200) throw new SkinError('MOJANG_REJECTED', String(r.status), { status: r.status });
         // Jamais de page d'erreur, de SVG ou d'autre chose gardé « pour toujours » : seulement un PNG Minecraft.
         if (!checkTextureBytes(r.bytes)) throw new SkinError('SKIN_INVALID_FORMAT', 'texture reçue invalide');
-        await cacheSet(key, r.bytes.slice(), TEXTURE_TTL);
-        return r.bytes;
+        const clean = await cleanTexture(r.bytes); // redessinée : seulement les pixels, aucune métadonnée
+        await cacheSet(key, clean.slice(), TEXTURE_TTL);
+        return clean;
       }, signal);
       return bytes.slice();
     } catch (err) {
@@ -240,7 +251,7 @@ export function createClient(opts = {}) {
   async function getSkin(playerOrQuery, { signal } = {}) {
     const p = await resolve(playerOrQuery, signal);
     const bytes = await getTexture(p.skin.hash, { signal });
-    return loadSkin(bytes, { model: checkModel(p.skin.model), hash: p.skin.hash });
+    return trustHash(await loadSkin(bytes, { model: checkModel(p.skin.model), hash: p.skin.hash }), p.skin.hash);
   }
 
   /** Cape Mojang d'un joueur, ou null s'il n'en porte pas. */
@@ -248,7 +259,7 @@ export function createClient(opts = {}) {
     const p = await resolve(playerOrQuery, signal);
     if (!p.cape) return null;
     const bytes = await getTexture(p.cape.hash, { signal });
-    return loadCape(bytes, { hash: p.cape.hash });
+    return trustHash(await loadCape(bytes, { hash: p.cape.hash }), p.cape.hash);
   }
 
   return { getPlayer, getTexture, getSkin, getCape, cache };

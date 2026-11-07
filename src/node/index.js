@@ -14,11 +14,23 @@ import { loadSkin, checkModel } from '../core/skin.js';
 
 const MAX_FILE = 1024 * 1024;
 
-async function atomicWrite(file, data) {
-  await fs.mkdir(path.dirname(file), { recursive: true });
+/** Le dossier doit être un vrai dossier (pas un lien symbolique vers ailleurs). Créé s'il manque. */
+async function realDir(dir) {
+  try {
+    const st = await fs.lstat(dir);
+    if (!st.isDirectory()) throw new SkinError('STORAGE_FAILED', 'dossier inattendu (lien ?)');
+  } catch (err) {
+    if (!err || err.code !== 'ENOENT') throw err;
+    await fs.mkdir(dir, { recursive: true });
+  }
+}
+
+async function atomicWrite(file, data, { checkDir = true } = {}) {
+  if (checkDir) await realDir(path.dirname(file));
+  else await fs.mkdir(path.dirname(file), { recursive: true });
   const part = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.part`;
   try {
-    await fs.writeFile(part, data);
+    await fs.writeFile(part, data, { flag: 'wx' });
     for (let i = 0; ; i++) {
       try { await fs.rename(part, file); break; } catch (err) {
         // Windows : un antivirus peut bloquer un court instant.
@@ -51,6 +63,14 @@ async function readSmall(file, { strict = false } = {}) {
 }
 
 const MAX_DATA_TTL = 30 * 24 * 3600 * 1000;
+// « Joueur introuvable » n'est gardé qu'une minute ; on refuse une entrée plantée qui durerait plus.
+const MAX_NULL_TTL = 5 * 60 * 1000;
+const PRUNE_EVERY = 10 * 60 * 1000;
+
+async function realDirOnly(dir) {
+  const st = await fs.lstat(dir);
+  if (!st.isDirectory()) throw new SkinError('STORAGE_FAILED', 'dossier inattendu');
+}
 
 function checkDir(dir) {
   if (typeof dir !== 'string' || !dir.trim()) throw new SkinError('INVALID_OPTION', 'dossier');
@@ -72,6 +92,7 @@ export function createFileCache(dir) {
   const api = {
     async get(key) {
       const h = texKey(key);
+      try { await realDirOnly(path.join(root, h ? 'textures' : 'data')); } catch { return undefined; }
       if (h) {
         const b = await readSmall(texFile(h));
         return b && isPng(b) ? new Uint8Array(b) : undefined;
@@ -80,7 +101,7 @@ export function createFileCache(dir) {
       if (!b) return undefined;
       try {
         const e = JSON.parse(b.toString('utf8'));
-        if (!e || e.key !== key || typeof e.exp !== 'number' || e.exp > Date.now() + MAX_DATA_TTL) return undefined;
+        if (!e || e.key !== key || typeof e.exp !== 'number' || e.exp > Date.now() + (e.value === null ? MAX_NULL_TTL : MAX_DATA_TTL)) return undefined;
         if (e.exp <= Date.now()) {
           await fs.rm(dataFile(key), { force: true }).catch(() => {}); // périmé : effacé (aucun historique gardé)
           return undefined;
@@ -96,7 +117,7 @@ export function createFileCache(dir) {
         if (!(value instanceof Uint8Array) || !isPng(value)) return;
         return atomicWrite(texFile(h), value);
       }
-      const exp = Date.now() + Math.min(ttlMs, MAX_DATA_TTL);
+      const exp = Date.now() + Math.min(ttlMs, value === null ? MAX_NULL_TTL : MAX_DATA_TTL);
       return atomicWrite(dataFile(key), JSON.stringify({ key, exp, value }));
     },
     async delete(key) {
@@ -106,6 +127,7 @@ export function createFileCache(dir) {
     /** Efface les données périmées (profils des autres joueurs, etc.). */
     async prune() {
       const dir = path.join(root, 'data');
+      try { await realDirOnly(dir); } catch { return 0; }
       let names = [];
       try { names = await fs.readdir(dir); } catch { return 0; }
       let n = 0;
@@ -125,9 +147,12 @@ export function createFileCache(dir) {
       await fs.rm(path.join(root, 'data'), { recursive: true, force: true });
     },
   };
-  // Au démarrage, on efface les données périmées (en arrière-plan, sans jamais bloquer).
+  // Au démarrage puis toutes les 10 minutes, on efface les données périmées
+  // (en arrière-plan, sans jamais bloquer ni empêcher le programme de se fermer).
   const t = setTimeout(() => { api.prune().catch(() => {}); }, 0);
   if (t.unref) t.unref();
+  const iv = setInterval(() => { api.prune().catch(() => {}); }, PRUNE_EVERY);
+  if (iv.unref) iv.unref();
   return api;
 }
 
@@ -138,8 +163,8 @@ const MAX_ITEMS = 500;
 function cleanName(name) {
   if (name === undefined) return 'Skin';
   if (typeof name !== 'string') throw new SkinError('INVALID_OPTION', 'nom');
-  // eslint-disable-next-line no-control-regex
-  const s = name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 64);
+  // Ni caractères de contrôle, ni caractères invisibles ou d'inversion de sens (U+202E…).
+  const s = Array.from(name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '').trim()).slice(0, 64).join('').trim();
   return s || 'Skin';
 }
 
@@ -168,7 +193,7 @@ export function createWardrobe(dir) {
     try {
       const j = JSON.parse(b.toString('utf8'));
       return Array.isArray(j) ? j.filter((e) => e && ID_RE.test(e.id) && (e.model === 'classic' || e.model === 'slim')).map((e) => ({
-        id: e.id, name: cleanName(e.name), model: e.model, addedAt: typeof e.addedAt === 'string' ? e.addedAt : '',
+        id: e.id, name: cleanName(e.name), model: e.model, addedAt: typeof e.addedAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(e.addedAt) ? e.addedAt : '',
       })) : [];
     } catch {
       // Index illisible : on le met de côté au lieu de l'écraser.
@@ -176,7 +201,8 @@ export function createWardrobe(dir) {
       return [];
     }
   }
-  const writeIndex = (items) => atomicWrite(indexFile, JSON.stringify(items, null, 2));
+  // Le dossier de la garde-robe est choisi par l'application (il peut être un lien voulu).
+  const writeIndex = (items) => atomicWrite(indexFile, JSON.stringify(items, null, 2), { checkDir: false });
 
   function need(id) {
     if (typeof id !== 'string' || !ID_RE.test(id)) throw new SkinError('INVALID_OPTION', 'identifiant');
@@ -207,7 +233,7 @@ export function createWardrobe(dir) {
       const items = await readIndex();
       if (items.length >= MAX_ITEMS) throw new SkinError('INVALID_OPTION', `garde-robe pleine (${MAX_ITEMS})`);
       const id = crypto.randomBytes(8).toString('hex');
-      await atomicWrite(pngFile(id), await encodePng(skin.source));
+      await atomicWrite(pngFile(id), await encodePng(skin.source), { checkDir: false });
       const entry = { id, name, model: skin.model, addedAt: new Date().toISOString() };
       items.push(entry);
       try { await writeIndex(items); } catch (err) { await fs.rm(pngFile(id), { force: true }); throw err; }

@@ -89,7 +89,8 @@ export async function request(rawUrl, opts = {}) {
       } catch (err) {
         throw netError(err, timedOut, userSignal, url);
       }
-      const loc = res.headers.get('location');
+      let loc;
+      try { loc = res.headers.get('location'); } catch (err) { throw netError(err, timedOut, userSignal, url); }
       if (res.status >= 300 && res.status < 400 && loc) {
         try { await res.body?.cancel(); } catch { /* rien */ }
         if (hop >= MAX_REDIRECTS) throw new SkinError('MOJANG_UNAVAILABLE', 'trop de redirections');
@@ -116,7 +117,8 @@ function netError(err, timedOut, userSignal, url) {
   if (err instanceof SkinError) return err;
   if (userSignal && userSignal.aborted) return new SkinError('CANCELLED');
   if (timedOut) return new SkinError('MOJANG_UNAVAILABLE', `délai dépassé ${url.host}`);
-  const code = (err && err.cause && err.cause.code) || (err && err.code) || 'réseau';
+  const raw = (err && err.cause && err.cause.code) || (err && err.code);
+  const code = typeof raw === 'string' && /^[A-Z0-9_]{1,40}$/.test(raw) ? raw : 'réseau'; // jamais de texte libre
   return new SkinError('MOJANG_UNAVAILABLE', `${code} ${url.host}`);
 }
 
