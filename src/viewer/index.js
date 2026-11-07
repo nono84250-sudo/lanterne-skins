@@ -100,7 +100,8 @@ export async function createViewer(container, opts = {}) {
     throw new SkinError('NOT_SUPPORTED', '3D (WebGL) indisponible', { cause: err });
   }
   const current = { skin, cape, elytra: !!opts.elytra };
-  let skinSeq = 0, capeSeq = 0;
+  // « Le dernier appel gagne » : seul un appel réussi plus récent remplace l'image ; rien après dispose().
+  let skinIssued = 0, skinApplied = 0, capeIssued = 0, capeApplied = 0, disposed = false;
   const showCape = () => {
     if (current.cape) {
       viewer.loadCape(toCanvas(current.cape), { backEquipment: current.elytra ? 'elytra' : 'cape' });
@@ -127,17 +128,19 @@ export async function createViewer(container, opts = {}) {
     canvas,
     /** Change le skin affiché (aperçu avant d'appliquer, par exemple). */
     async setSkin(next) {
-      const seq = ++skinSeq;
+      const seq = ++skinIssued;
       const s = await asSkin(next);
-      if (seq !== skinSeq) return; // un appel plus récent a gagné
+      if (disposed || seq < skinApplied) return; // un appel plus récent a déjà été affiché
+      skinApplied = seq;
       current.skin = s;
       viewer.loadSkin(toCanvas(s), { model: s.model === 'slim' ? 'slim' : 'default' });
     },
     /** Change ou enlève (null) la cape. */
     async setCape(next) {
-      const seq = ++capeSeq;
+      const seq = ++capeIssued;
       const c = await asCape(next);
-      if (seq !== capeSeq) return;
+      if (disposed || seq < capeApplied) return;
+      capeApplied = seq;
       current.cape = c;
       showCape();
     },
@@ -151,7 +154,12 @@ export async function createViewer(container, opts = {}) {
     setPaused(on) { viewer.renderPaused = !!on; },
     resetCamera() { viewer.resetCameraPose(); },
     /** Libère la carte graphique et retire le canvas. */
-    dispose() { viewer.dispose(); canvas.remove(); },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      viewer.dispose();
+      canvas.remove();
+    },
     /**
      * Accès direct à skinview3d pour les usages avancés. Attention : ses fonctions acceptent
      * des adresses web ; ne jamais lui donner d'adresse qui ne soit pas officielle.

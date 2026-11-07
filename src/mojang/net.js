@@ -51,7 +51,14 @@ export function createRateLimiter(max = 300, windowMs = 10_000) {
       }
     });
     chain = p.catch(() => {});
-    return p;
+    if (!signal) return p;
+    // L'annulation compte tout de suite, même si on attend encore son tour dans la file.
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) { p.catch(() => {}); return reject(new SkinError('CANCELLED')); }
+      const onAbort = () => { p.catch(() => {}); reject(new SkinError('CANCELLED')); };
+      signal.addEventListener('abort', onAbort, { once: true });
+      p.then((v) => { signal.removeEventListener('abort', onAbort); resolve(v); }, (e) => { signal.removeEventListener('abort', onAbort); reject(e); });
+    });
   };
 }
 

@@ -4,7 +4,6 @@
  * Le visualiseur 3D est à part : import('lanterne-skins/viewer'), chargé seulement quand on l'affiche.
  */
 
-import { createClient } from './mojang/client.js';
 
 export { SkinError, MESSAGES, ERROR_CODES, getMessage } from './errors.js';
 export { RgbaImage } from './core/image.js';
@@ -17,8 +16,7 @@ export { ALLOWED_HOSTS } from './mojang/net.js';
 export { DEFAULT_SKINS, defaultSkinFor } from './mojang/defaults.js';
 export { account, getProfile, setSkin, resetSkin, setCape, hideCape } from './mojang/account.js';
 
-let shared = null;
-const client = () => (shared ||= createClient());
+import { sharedClient as client } from './mojang/shared.js';
 
 /** Joueur par pseudo ou UUID : UUID, pseudo, lien du skin, bras, cape. */
 export const getPlayer = (q, o) => client().getPlayer(q, o);
