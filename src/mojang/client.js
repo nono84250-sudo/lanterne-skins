@@ -18,7 +18,10 @@ const NAME_RE = /^[A-Za-z0-9_]{1,16}$/;
 const PROFILE_NAME_RE = /^[A-Za-z0-9_]{1,25}$/;
 const UUID_RE = /^[0-9a-f]{32}$/i;
 const UUID_DASHED_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const HASH_RE = /^[0-9a-f]{16,128}$/;
+const HASH_RE = /^[0-9a-fA-F]{16,128}$/;
+// Marque « joueur introuvable » dans le cache (null/undefined = pas dans le cache, comme Redis/KV).
+const NOT_FOUND = Object.freeze({ notFound: true });
+const isNotFound = (v) => !!v && typeof v === 'object' && v.notFound === true && Object.keys(v).length === 1;
 
 export function dashUuid(id) {
   return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
@@ -47,7 +50,10 @@ export function textureFromUrl(raw) {
 }
 
 export function textureUrl(hashOrUrl) {
-  if (typeof hashOrUrl === 'string' && HASH_RE.test(hashOrUrl)) return { hash: hashOrUrl, url: `https://textures.minecraft.net/texture/${hashOrUrl}` };
+  if (typeof hashOrUrl === 'string' && HASH_RE.test(hashOrUrl)) {
+    const h = hashOrUrl.toLowerCase();
+    return { hash: h, url: `https://textures.minecraft.net/texture/${h}` };
+  }
   const t = textureFromUrl(hashOrUrl);
   if (!t) throw new SkinError('HOST_NOT_ALLOWED', 'texture non officielle');
   return t;
@@ -152,7 +158,7 @@ export function createClient(opts = {}) {
   async function nameToId(name, signal) {
     const key = `name:${name.toLowerCase()}`;
     const hit = await cacheGet(key);
-    if (hit === null) throw new SkinError('PLAYER_NOT_FOUND');
+    if (isNotFound(hit)) throw new SkinError('PLAYER_NOT_FOUND');
     if (typeof hit === 'string' && UUID_RE.test(hit)) return hit.toLowerCase();
     if (signal && signal.aborted) throw new SkinError('CANCELLED');
     return once(key, async () => {
@@ -160,7 +166,7 @@ export function createClient(opts = {}) {
       const e = commonStatusError(r);
       if (e) throw e;
       if (r.status === 204 || r.status === 404) {
-        await cacheSet(key, null, NOT_FOUND_TTL);
+        await cacheSet(key, NOT_FOUND, NOT_FOUND_TTL);
         throw new SkinError('PLAYER_NOT_FOUND');
       }
       if (r.status === 400) throw new SkinError('INVALID_NAME');
@@ -176,7 +182,7 @@ export function createClient(opts = {}) {
   async function profile(id, signal) {
     const key = `profile:${id}`;
     const hit = await cacheGet(key);
-    if (hit === null) throw new SkinError('PLAYER_NOT_FOUND');
+    if (isNotFound(hit)) throw new SkinError('PLAYER_NOT_FOUND');
     const valid = hit && validCachedProfile(hit, id);
     if (valid) return valid;
     if (signal && signal.aborted) throw new SkinError('CANCELLED');
@@ -185,7 +191,7 @@ export function createClient(opts = {}) {
       const e = commonStatusError(r);
       if (e) throw e;
       if (r.status === 204 || r.status === 404) {
-        await cacheSet(key, null, NOT_FOUND_TTL);
+        await cacheSet(key, NOT_FOUND, NOT_FOUND_TTL);
         throw new SkinError('PLAYER_NOT_FOUND');
       }
       if (r.status === 400) throw new SkinError('INVALID_NAME');

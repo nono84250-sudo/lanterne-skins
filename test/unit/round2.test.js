@@ -172,3 +172,35 @@ test('tour 3 : fetch qui suit lui-même une redirection vers ailleurs → refus�
   await assert.rejects(createClient({ fetch: f1 }).getPlayer('Bob'), code('MOJANG_UNAVAILABLE'));
   await assert.rejects(createClient({ fetch: f2 }).getPlayer('Bob'), code('HOST_NOT_ALLOWED'));
 });
+
+test('tour 3 : vieux skin au chapeau opaque → envoyé/rangé sans chapeau (comme en jeu)', async () => {
+  const s = await loadSkin(testSkin({ h: 32 }));
+  assert.equal(s.source.data[(8 * 64 + 40) * 4 + 3], 0);
+  const again = await loadSkin(await s.source.toPNG());
+  assert.deepEqual([...renderHead(again, { size: 8 }).data], [...renderHead(s, { size: 8 }).data]);
+});
+
+test('tour 3 : cache de type Redis/KV qui renvoie null quand la clé manque', async () => {
+  const store = new Map();
+  const kv = { get: async (k) => (store.has(k) ? store.get(k) : null), set: async (k, v) => { store.set(k, v); }, delete: async (k) => { store.delete(k); } };
+  const ID = '069a79f444e94726a5befca90e38aaf5';
+  const fetch = async (u) => {
+    if (String(u).includes('api.mojang.com')) return new Response(JSON.stringify({ id: ID, name: 'Notch' }));
+    if (String(u).includes('sessionserver')) return new Response(JSON.stringify({ id: ID, name: 'Notch', properties: [] }));
+    return new Response(null, { status: 204 });
+  };
+  const c = createClient({ cache: kv, fetch });
+  assert.equal((await c.getPlayer('Notch')).id, ID);
+  const fetch404 = async () => new Response(null, { status: 204 });
+  const c2 = createClient({ cache: kv, fetch: fetch404 });
+  await assert.rejects(c2.getPlayer('Personne'), code('PLAYER_NOT_FOUND'));
+  await assert.rejects(c2.getPlayer('Personne'), code('PLAYER_NOT_FOUND'));
+  assert.deepEqual(store.get('name:personne'), { notFound: true });
+});
+
+test('tour 3 : empreinte en majuscules acceptée ; close() arrête le nettoyage', async () => {
+  const { textureUrl } = await import('../../src/index.js');
+  assert.equal(textureUrl('AB'.repeat(32)).hash, 'ab'.repeat(32));
+  const c = createFileCache(await tmpDir());
+  c.close();
+});

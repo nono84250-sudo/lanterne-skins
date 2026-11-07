@@ -144,6 +144,10 @@ export async function loadSkin(input, opts = {}) {
   const decoded = await decodeChecked(bytes, [[64, 64], [64, 32]], 'skin');
   const legacy = decoded.height === 32;
   const source = convertLegacy(decoded);
+  // Vieux skin au chapeau entièrement opaque : le jeu l'ignore. On l'efface aussi dans la version
+  // 64×64 qu'on envoie à Mojang ou qu'on range, sinon il cacherait le visage une fois converti.
+  // (Le jeu rend ensuite le bras opaque : seule la zone du chapeau, y 0-16, change vraiment.)
+  if (legacy && areaAll(source, 32, 0, 64, 32, (a) => a >= 128)) setAlpha(source, 32, 0, 64, 16, 0);
   const model = opts.model ? checkModel(opts.model) : legacy ? 'classic' : detectModel(source);
   return new Skin(normalizeForGame(source, legacy), { model, legacy, source, hash: opts.hash });
 }
