@@ -5,6 +5,20 @@ Marche dans Node.js (≥ 20), Electron et le navigateur. Zéro dépendance (le v
 
 > English: [README.en.md](README.en.md)
 
+## Pourquoi ce projet
+
+Afficher la tête ou le skin d'un joueur, ou laisser quelqu'un changer son skin depuis un launcher, passe presque toujours
+par des sites tiers (Crafatar, mc-heads, NameMC…). Ces services peuvent tomber en panne, limiter les requêtes,
+disparaître, ou voir passer les pseudos de tous vos joueurs.
+
+lanterne-skins fait tout lui-même :
+
+- **Aucun service tiers.** Seulement l'API officielle de Mojang/Microsoft ; les rendus 2D sont dessinés par notre propre code.
+- **Sûr.** Les images sont vérifiées puis redessinées (aucune donnée cachée), seuls 4 sites officiels sont autorisés,
+  le jeton du joueur n'est jamais gardé ni journalisé.
+- **Zéro dépendance**, et le même code marche dans Node.js, Electron et le navigateur.
+- **Respectueux de Mojang** : cache intégré et limite de requêtes sous le seuil de Mojang.
+
 ## Ce que ça fait
 
 | Fonction | Rôle | Où |
@@ -73,6 +87,98 @@ const garde = createWardrobe('<dossier du launcher>/garde-robe');
 await garde.add(fichierPng, { name: 'Mon skin d’été' });
 ```
 
+## Toutes les commandes
+
+### Joueurs (lecture, sans connexion)
+
+| Fonction | Rôle |
+|---|---|
+| `getPlayer(pseudoOuUuid)` | UUID, pseudo, skin (lien, empreinte, bras fins ou épais), cape |
+| `getSkin(joueur)` | skin du joueur, prêt à afficher (skin par défaut s'il n'en a pas) |
+| `getCape(joueur)` | cape du joueur, ou `null` |
+| `getTexture(empreinte)` | image brute de `textures.minecraft.net` |
+| `createClient({ cache, profileTtl })` | client à part, avec son propre cache ; mêmes fonctions + `invalidate(joueur)` |
+| `defaultClient()` | le client partagé utilisé par les fonctions ci-dessus |
+| `parsePlayerQuery(texte)` / `textureUrl(empreinte)` | outils : reconnaître pseudo ou UUID, construire un lien de texture officiel |
+| `DEFAULT_SKINS`, `defaultSkinFor(uuid)` | skins par défaut de Minecraft (Steve, Alex…) |
+
+### Fichiers de skin et de cape
+
+| Fonction | Rôle |
+|---|---|
+| `loadSkin(png, { model })` | vérifie un skin et le prépare (64×32 converti en 64×64) |
+| `loadCape(png)` | vérifie une cape (64×32) |
+| `detectModel(skin)` | devine bras fins (`slim`) ou épais (`classic`) |
+| `convertLegacy(image)` | convertit un ancien skin 64×32 en 64×64 |
+| `skin.toPNG()` | PNG propre, sans aucune donnée cachée |
+
+### Rendus 2D
+
+| Fonction | Rôle |
+|---|---|
+| `renderHead(skin, { size, hat })` | tête, avec ou sans chapeau |
+| `renderFront(skin, { scale, layers, view })` | vue de face : `view: 'full'` (corps entier) ou `'bust'` (buste) |
+| `renderCape(cape, { scale })` | face extérieure de la cape |
+| `rendu.toPNG()` / `rendu.toDataURL()` | octets PNG, ou lien pour `<img src>` |
+
+### Visualiseur 3D (`lanterne-skins/viewer`, navigateur et Electron)
+
+| Commande | Rôle |
+|---|---|
+| `createViewer(zone, { skin, cape, animation, autoRotate })` | crée le visualiseur dans un élément de la page |
+| `v.setSkin(skin)` / `v.setCape(cape)` | changer le skin ou la cape affichés |
+| `v.setElytra(true)` | afficher des élytres à la place de la cape |
+| `v.setAnimation(nom, vitesse)` | `'none'`, `'idle'`, `'walk'`, `'run'`, `'wave'`, `'fly'`, `'crouch'` (liste : `ANIMATIONS`) |
+| `v.setLayers({ hat, jacket, ... })` | afficher ou cacher les couches |
+| `v.setAutoRotate(true)` / `v.setZoom(1.5)` / `v.resetCamera()` | rotation automatique, zoom, caméra d'origine |
+| `v.setSize(largeur, hauteur)` / `v.setPaused(true)` | taille, pause de l'animation |
+| `v.dispose()` | libère le visualiseur |
+
+### Son propre compte (launcher, avec le jeton Minecraft)
+
+| Fonction | Rôle |
+|---|---|
+| `account.getProfile(jeton)` | mes skins et mes capes |
+| `account.setSkin(jeton, png, { model })` | changer mon skin (`'classic'` ou `'slim'`) |
+| `account.resetSkin(jeton)` | revenir au skin par défaut |
+| `account.setCape(jeton, idCape)` | porter une cape que je possède |
+| `account.hideCape(jeton)` | ne plus porter de cape |
+
+### Cache et garde-robe (`lanterne-skins/node`, Node et Electron)
+
+| Commande | Rôle |
+|---|---|
+| `createFileCache(dossier)` | cache sur le disque : `get`, `set`, `delete`, `prune()` (nettoyage), `clear()`, `close()` |
+| `createMemoryCache()` / `createNoCache()` | cache en mémoire (par défaut) ou aucun cache |
+| `cacheHeaders(type)` | en-têtes de cache pour un site (`'texture'`, `'profile'`, `'render'`, `'render-by-hash'`) |
+| `createWardrobe(dossier)` | garde-robe locale : `list()`, `add(png, { name })`, `get(id)`, `getBytes(id)`, `rename(id, nom)`, `remove(id)` |
+
+### Erreurs et outils
+
+| Fonction | Rôle |
+|---|---|
+| `SkinError`, `ERROR_CODES`, `MESSAGES`, `getMessage(code, 'fr')` | erreurs avec un code fixe, message anglais et français |
+| `decodePng`, `encodePng`, `isPng`, `readHeader`, `RgbaImage` | lecture et écriture PNG sûres |
+| `ALLOWED_HOSTS`, `DEFAULT_MAX_BYTES` | sites autorisés, taille maximale d'un fichier |
+
+### Commandes du terminal
+
+```
+npm test               # tests automatiques (faux serveur local, aucun accès Internet)
+npm run test:browser   # vrai navigateur : rendus 2D + visualiseur 3D
+npm run test:live      # vrais essais contre Mojang (Internet)
+```
+
+### Installation
+
+Pas encore publié sur npm. En attendant :
+
+```
+npm install github:nono84250-sudo/lanterne-skins
+```
+
+Bibliothèque sœur : [lanterne](https://github.com/nono84250-sudo/lanterne), le moteur qui installe et lance Minecraft.
+
 ## Erreurs
 
 Chaque erreur est une `SkinError` avec un **code fixe**, un message anglais par défaut et le français fourni :
@@ -114,5 +220,5 @@ npm run test:browser   # vrai navigateur : rendus 2D + visualiseur 3D (Playwrigh
 npm run test:live      # vrais essais contre Mojang (Internet)
 ```
 
-Licence MIT. Code tiers embarqué : voir [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Sécurité : [SECURITY.md](SECURITY.md).
+Licence MIT. Code tiers embarqué : voir [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Sécurité : [SECURITY.md](SECURITY.md). Contribuer : [CONTRIBUTING.md](CONTRIBUTING.md).
 Projet indépendant, non affilié à Mojang ni Microsoft. « Minecraft » est une marque de Mojang/Microsoft.

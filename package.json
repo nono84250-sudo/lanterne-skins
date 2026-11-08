@@ -3,6 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "description": "Têtes, skins et capes Minecraft (lecture Mojang, rendus 2D, visualiseur 3D, changement de skin). Zéro dépendance, aucun service tiers.",
+  "keywords": [
+    "minecraft",
+    "skin",
+    "skins",
+    "cape",
+    "minecraft-skin",
+    "skin-viewer",
+    "3d",
+    "mojang",
+    "electron"
+  ],
+  "homepage": "https://github.com/nono84250-sudo/lanterne-skins#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nono84250-sudo/lanterne-skins.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nono84250-sudo/lanterne-skins/issues"
+  },
   "type": "module",
   "main": "./src/index.js",
   "exports": {
@@ -12,9 +31,19 @@
     "./package.json": "./package.json"
   },
   "license": "MIT",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "sideEffects": false,
-  "files": ["src", "README.md", "README.en.md", "SECURITY.md", "CHANGELOG.md", "LICENSE", "THIRD-PARTY-NOTICES.md"],
+  "files": [
+    "src",
+    "README.md",
+    "README.en.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md"
+  ],
   "scripts": {
     "test": "node test/run.js",
     "test:browser": "node test/browser/run-browser.js",
