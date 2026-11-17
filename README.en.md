@@ -150,4 +150,4 @@ Codes: PLAYER_NOT_FOUND, INVALID_NAME, SKIN_INVALID_FORMAT, SKIN_INVALID_SIZE, S
 ## Cache
 Textures forever, profiles 10 minutes, "not found" 1 minute, rendered images memoised per skin. Built-in rate limit (300 requests / 10 s per client) and request de-duplication.
 
-MIT licence. See [SECURITY.md](SECURITY.md) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Not affiliated with Mojang or Microsoft.
+Licence: [GNU GPL v3](LICENSE) (GPL-3.0-only), copyright (C) 2026 the lanterne-skins authors. The bundled third-party code (skinview3d, three.js) keeps its original MIT licence: see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Security: [SECURITY.md](SECURITY.md). Not affiliated with Mojang or Microsoft.

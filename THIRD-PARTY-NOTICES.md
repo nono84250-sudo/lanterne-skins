@@ -2,6 +2,10 @@
 
 Le visualiseur 3D (`src/viewer/vendor/skinview3d.esm.js`) embarque le code de ces projets, regroupé et minifié (esbuild) sans modification du code source, sous licence MIT. Rien n'est chargé depuis Internet.
 
+Ce code embarqué garde sa licence MIT d'origine (textes ci-dessous). Le reste de lanterne-skins est sous licence GNU GPL v3 (voir [LICENSE](LICENSE)).
+
+This bundled code keeps its original MIT licence (texts below). The rest of lanterne-skins is licensed under the GNU GPL v3 (see [LICENSE](LICENSE)).
+
 ## skinview3d 3.4.2
 
 ```

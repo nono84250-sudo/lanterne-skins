@@ -220,5 +220,5 @@ npm run test:browser   # vrai navigateur : rendus 2D + visualiseur 3D (Playwrigh
 npm run test:live      # vrais essais contre Mojang (Internet)
 ```
 
-Licence MIT. Code tiers embarqué : voir [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Sécurité : [SECURITY.md](SECURITY.md). Contribuer : [CONTRIBUTING.md](CONTRIBUTING.md).
+Licence [GNU GPL v3](LICENSE) (GPL-3.0-only), copyright (C) 2026 les auteurs de lanterne-skins. Code tiers embarqué (skinview3d, three.js) : il garde sa licence MIT d'origine, voir [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Sécurité : [SECURITY.md](SECURITY.md). Contribuer : [CONTRIBUTING.md](CONTRIBUTING.md).
 Projet indépendant, non affilié à Mojang ni Microsoft. « Minecraft » est une marque de Mojang/Microsoft.

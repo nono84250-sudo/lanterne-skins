@@ -30,7 +30,7 @@
     "./viewer": "./src/viewer/index.js",
     "./package.json": "./package.json"
   },
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "engines": {
     "node": ">=20"
   },
